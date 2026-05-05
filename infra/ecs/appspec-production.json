@@ -1,0 +1,20 @@
+{
+  "version": 0.0,
+  "Resources": [{
+    "TargetService": {
+      "Type": "AWS::ECS::Service",
+      "Properties": {
+        "TaskDefinition": "<TASK_DEFINITION>",
+        "LoadBalancerInfo": {
+          "ContainerName": "api",
+          "ContainerPort": 8000
+        },
+        "PlatformVersion": "LATEST"
+      }
+    }
+  }],
+  "Hooks": [
+    { "BeforeAllowTraffic": "sepang-pre-traffic-hook" },
+    { "AfterAllowTraffic":  "sepang-post-traffic-hook" }
+  ]
+}

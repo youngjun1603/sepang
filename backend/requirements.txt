@@ -1,0 +1,38 @@
+# 세팡 FastAPI 백엔드 의존성
+# pip install -r requirements.txt
+
+# Core
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+
+# Database
+sqlalchemy==2.0.36
+asyncpg==0.30.0          # PostgreSQL 비동기 드라이버
+alembic==1.14.0           # DB 마이그레이션
+geoalchemy2==0.17.0       # PostGIS 타입 지원
+
+# Auth
+pyjwt==2.10.1
+bcrypt==4.2.1
+pyotp==2.9.0              # TOTP (관리자 2FA)
+
+# Supabase (Storage + Realtime)
+supabase==2.10.0
+httpx==0.28.1
+
+# 알림
+firebase-admin==6.6.0     # FCM
+pywebpush==2.0.0          # Web Push VAPID
+
+# Utils
+python-multipart==0.0.20  # 파일 업로드
+Pillow==11.1.0             # 이미지 처리
+
+# Rate Limiting
+slowapi==0.1.9
+
+# Dev
+pytest==8.3.4
+pytest-asyncio==0.25.2

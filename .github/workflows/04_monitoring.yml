@@ -1,0 +1,135 @@
+# ============================================================
+# 모니터링 — SLA 감시 + 장애 감지 + DB 백업 검증
+# ============================================================
+name: Monitoring & Health
+
+on:
+  schedule:
+    # 5분 간격 헬스 체크
+    - cron: "*/5 * * * *"
+    # 매일 03:00 KST (18:00 UTC) DB 백업 검증
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+jobs:
+  # ── 헬스 체크 ────────────────────────────────────────────
+  health-check:
+    name: "Health check"
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '*/5 * * * *' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Check all endpoints
+        id: healthcheck
+        run: |
+          FAILED=0
+          check() {
+            URL=$1; NAME=$2
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$URL" --max-time 10 || echo "000")
+            if [ "$STATUS" != "200" ]; then
+              echo "::error::$NAME failed — HTTP $STATUS"
+              FAILED=$((FAILED+1))
+            else
+              echo "✅ $NAME — $STATUS"
+            fi
+          }
+          check "https://api.sepang.kr/health"           "API Health"
+          check "https://api.sepang.kr/api/v1/health/db" "DB Connection"
+          check "https://sepang.kr"                      "Customer App"
+          check "https://partner.sepang.kr"              "Partner App"
+          exit $FAILED
+
+      - name: Alert on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "🚨 *서비스 이상 감지*\n헬스 체크 실패 — 즉시 확인 필요\n<https://monitoring.sepang.kr|대시보드 열기>"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # ── SLA 위반 주문 감시 ────────────────────────────────────
+  sla-monitor:
+    name: "SLA violation monitor"
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '*/5 * * * *'
+
+    steps:
+      - name: Check SLA at-risk orders via API
+        id: sla
+        run: |
+          RESPONSE=$(curl -sf \
+            -H "Authorization: Bearer ${{ secrets.MONITOR_API_TOKEN }}" \
+            "https://api.sepang.kr/api/v1/admin/sla-at-risk" \
+            --max-time 10)
+          COUNT=$(echo "$RESPONSE" | python3 -c "import sys,json; data=json.load(sys.stdin); print(len(data))")
+          BREACHED=$(echo "$RESPONSE" | python3 -c "
+          import sys,json; data=json.load(sys.stdin)
+          print(sum(1 for o in data if o.get('hours_left',99) < 0))")
+          echo "at_risk_count=$COUNT"    >> $GITHUB_OUTPUT
+          echo "breached_count=$BREACHED" >> $GITHUB_OUTPUT
+          echo "SLA at-risk: $COUNT, Breached: $BREACHED"
+
+      - name: Alert on SLA breach
+        if: steps.sla.outputs.breached_count != '0'
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "🚨 *SLA 위반 발생*\n위반 주문: ${{ steps.sla.outputs.breached_count }}건 | 위험 주문: ${{ steps.sla.outputs.at_risk_count }}건\n<https://admin.internal.sepang.kr/orders|즉시 처리하기>"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # ── DB 백업 검증 ─────────────────────────────────────────
+  backup-verify:
+    name: "DB backup verification"
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 18 * * *'
+    permissions: { id-token: write }
+
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sepang-backup-verifier
+          aws-region:     ap-northeast-2
+
+      - name: Verify latest RDS snapshot
+        run: |
+          SNAPSHOT=$(aws rds describe-db-snapshots \
+            --db-instance-identifier sepang-db-production \
+            --query "reverse(sort_by(DBSnapshots, &SnapshotCreateTime))[0]" \
+            --output json)
+
+          STATUS=$(echo "$SNAPSHOT" | python3 -c "import sys,json; print(json.load(sys.stdin)['Status'])")
+          AGE_H=$(echo "$SNAPSHOT" | python3 -c "
+          import sys,json,datetime
+          ts = json.load(sys.stdin)['SnapshotCreateTime']
+          dt = datetime.datetime.fromisoformat(ts.replace('Z','+00:00'))
+          print((datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds() / 3600)")
+
+          echo "Snapshot status: $STATUS, Age: ${AGE_H}h"
+
+          if [ "$STATUS" != "available" ]; then
+            echo "❌ Latest snapshot not available: $STATUS"
+            exit 1
+          fi
+          if python3 -c "exit(0 if float('$AGE_H') < 25 else 1)"; then
+            echo "✅ Backup is fresh (${AGE_H}h ago)"
+          else
+            echo "❌ Backup is too old (${AGE_H}h ago)"
+            exit 1
+          fi
+
+      - name: Notify backup status
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            { "text": "⚠️ *DB 백업 이상*\n최신 스냅샷이 24시간 이내 없습니다. 즉시 확인 필요." }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+

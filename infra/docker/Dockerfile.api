@@ -1,0 +1,60 @@
+# ============================================================
+# Dockerfile — FastAPI API 서버
+# 멀티스테이지 빌드 (의존성 캐시 최적화)
+# ============================================================
+
+# ── 1단계: 의존성 빌더 ─────────────────────────────────────
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+
+# 시스템 패키지 (PostGIS 클라이언트 라이브러리)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libpq-dev libgeos-dev libproj-dev gdal-bin \
+    && rm -rf /var/lib/apt/lists/*
+
+# 의존성 먼저 설치 (레이어 캐시 활용)
+COPY 08_requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r 08_requirements.txt
+
+# ── 2단계: 런타임 이미지 ────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+# 비특권 사용자
+RUN groupadd -r sepang && useradd -r -g sepang sepang
+
+# 런타임 라이브러리만 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 libgeos3.11.1 curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 의존성 복사
+COPY --from=builder /install /usr/local
+
+WORKDIR /app
+
+# 소스 복사 (캐시 활용 위해 마지막)
+COPY --chown=sepang:sepang . .
+
+USER sepang
+
+ARG ENVIRONMENT=production
+ARG BUILD_SHA=unknown
+ENV ENVIRONMENT=$ENVIRONMENT \
+    BUILD_SHA=$BUILD_SHA \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# 헬스체크
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "4", \
+     "--proxy-headers", \
+     "--forwarded-allow-ips", "*", \
+     "--access-log"]

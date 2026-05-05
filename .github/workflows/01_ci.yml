@@ -1,0 +1,182 @@
+# ============================================================
+# CI — 테스트 + 린트 + 타입 체크
+# 트리거: 모든 PR, main/develop 브랜치 push
+# ============================================================
+name: CI
+
+on:
+  push:
+    branches: [main, develop, "release/**"]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true   # 같은 브랜치 중복 실행 취소
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION:   "20"
+
+jobs:
+  # ── 1. 백엔드 린트 & 타입 체크 ──────────────────────────────
+  backend-lint:
+    name: "Backend — Lint & Type check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('backend/requirements.txt') }}
+
+      - name: Install dev deps
+        run: pip install ruff mypy types-bcrypt types-jwt -r backend/requirements.txt
+
+      - name: Ruff lint
+        run: ruff check . --output-format=github
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+      - name: Mypy type check
+        run: mypy app/ --ignore-missing-imports --strict
+
+  # ── 2. 단위 테스트 (DB 없이 빠르게) ────────────────────────
+  unit-tests:
+    name: "Unit tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - name: Install deps
+        run: pip install pytest pytest-asyncio pyjwt bcrypt pyotp
+      - name: Run unit tests
+        run: pytest tests/unit/ -v --tb=short --junit-xml=test-results/unit.xml
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: unit-test-results, path: test-results/ }
+
+  # ── 3. 통합 테스트 (PostgreSQL + PostGIS) ─────────────────
+  integration-tests:
+    name: "Integration tests"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB:       sepang_test
+          POSTGRES_USER:     sepang
+          POSTGRES_PASSWORD: test-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sepang"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 10s
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+
+      - name: Install deps
+        run: pip install -r backend/requirements.txt pytest pytest-asyncio httpx pyjwt
+
+      - name: Run Alembic migrations
+        env:
+          DATABASE_URL: postgresql+asyncpg://sepang:test-password@localhost:5432/sepang_test
+        run: alembic upgrade head
+
+      - name: Run integration tests
+        env:
+          TEST_DATABASE_URL: postgresql+asyncpg://sepang:test-password@localhost:5432/sepang_test
+          REDIS_URL:         redis://localhost:6379/0
+          JWT_SECRET:        test-secret-key
+          S3_BUCKET:         sepang-photos-test
+          AWS_DEFAULT_REGION: ap-northeast-2
+        run: |
+          pytest tests/integration/ -v --tb=short \
+            --junit-xml=test-results/integration.xml \
+            --cov=app --cov-report=xml:coverage.xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with: { file: coverage.xml, flags: integration }
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: integration-test-results, path: test-results/ }
+
+  # ── 4. 프론트엔드 타입 체크 ────────────────────────────────
+  frontend-typecheck:
+    name: "Frontend — TypeScript"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  # ── 5. E2E 테스트 (Playwright) ────────────────────────────
+  e2e-tests:
+    name: "E2E — Customer app"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+      - name: Install customer deps
+        working-directory: frontend/customer
+        run: npm ci
+      - name: Install Playwright browsers
+        working-directory: frontend/customer
+        run: npx playwright install chromium --with-deps
+      - name: Run E2E tests
+        working-directory: frontend/customer
+        env:
+          E2E_BASE_URL: http://localhost:3000
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+        run: npm run test:e2e -- --project=chromium
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: playwright-report, path: frontend/customer/playwright-report/ }
+
+  # ── 6. 보안 취약점 스캔 ────────────────────────────────────
+  security-scan:
+    name: "Security scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          format: sarif
+          output: trivy-results.sarif
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: trivy-results.sarif }
+
+      - name: Python dependency audit
+        run: |
+          pip install pip-audit
+          pip-audit -r backend/requirements.txt --desc
+

@@ -1,0 +1,168 @@
+# ============================================================
+# CD Staging — develop 브랜치 → 스테이징 자동 배포
+# 트리거: develop 브랜치 push (CI 통과 후)
+# ============================================================
+name: CD — Staging
+
+on:
+  # AWS ECS 배포 비활성화 — Vercel로 이전됨 (02_cd_vercel.yml 참조)
+  workflow_dispatch:
+
+env:
+  AWS_REGION:        ap-northeast-2
+  ECR_REGISTRY:      ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-northeast-2.amazonaws.com
+  IMAGE_TAG:         ${{ github.sha }}
+
+jobs:
+  deploy-staging:
+    name: "Build & Deploy → Staging"
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.sepang.kr
+    permissions:
+      id-token: write   # OIDC
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── AWS 인증 (OIDC — 장기 자격증명 없음) ────────────────
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sepang-github-actions-staging
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ── Docker 이미지 빌드 & 푸시 ─────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file:    infra/docker/Dockerfile.api
+          push:    true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/sepang-api:${{ env.IMAGE_TAG }}
+            ${{ env.ECR_REGISTRY }}/sepang-api:staging-latest
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+          build-args: |
+            ENVIRONMENT=staging
+            BUILD_SHA=${{ github.sha }}
+
+      - name: Build & push Celery worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file:    infra/docker/Dockerfile.worker
+          push:    true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/sepang-worker:${{ env.IMAGE_TAG }}
+            ${{ env.ECR_REGISTRY }}/sepang-worker:staging-latest
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+      # ── DB 마이그레이션 (ECS 일회성 태스크) ─────────────────
+      - name: Run DB migrations
+        run: |
+          TASK_ARN=$(aws ecs run-task \
+            --cluster sepang-staging \
+            --task-definition sepang-migrate-staging \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={
+              subnets=[${{ secrets.PRIVATE_SUBNET_IDS }}],
+              securityGroups=[${{ secrets.ECS_SECURITY_GROUP }}],
+              assignPublicIp=DISABLED
+            }" \
+            --overrides '{"containerOverrides":[{"name":"api","command":["alembic","upgrade","head"]}]}' \
+            --query "tasks[0].taskArn" --output text)
+
+          echo "Migration task ARN: $TASK_ARN"
+
+          # 완료까지 대기 (최대 3분)
+          aws ecs wait tasks-stopped \
+            --cluster sepang-staging \
+            --tasks "$TASK_ARN"
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster sepang-staging \
+            --tasks "$TASK_ARN" \
+            --query "tasks[0].containers[0].exitCode" --output text)
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "❌ Migration failed with exit code $EXIT_CODE"
+            exit 1
+          fi
+          echo "✅ Migration completed successfully"
+
+      # ── ECS 서비스 업데이트 ──────────────────────────────────
+      - name: Update ECS task definition — API
+        id: task-def-api
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition:  ecs/task-def-api-staging.json
+          container-name:   api
+          image:            ${{ env.ECR_REGISTRY }}/sepang-api:${{ env.IMAGE_TAG }}
+
+      - name: Deploy API to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition:     ${{ steps.task-def-api.outputs.task-definition }}
+          service:             sepang-api-staging
+          cluster:             sepang-staging
+          wait-for-service-stability: true
+          codedeploy-appspec:  ecs/appspec-staging.json   # Blue/Green 배포
+
+      - name: Update Celery worker
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ecs/task-def-worker-staging.json
+          service:         sepang-worker-staging
+          cluster:         sepang-staging
+          wait-for-service-stability: true
+
+      # ── 스모크 테스트 ───────────────────────────────────────
+      - name: Smoke test
+        run: |
+          MAX_RETRIES=10
+          for i in $(seq 1 $MAX_RETRIES); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://api-staging.sepang.kr/health)
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Staging health check passed"
+              break
+            fi
+            echo "Attempt $i/$MAX_RETRIES — status: $STATUS"
+            sleep 10
+          done
+          [ "$STATUS" = "200" ] || (echo "❌ Health check failed" && exit 1)
+
+      # ── Slack 알림 ──────────────────────────────────────────
+      - name: Notify Slack — success
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "✅ *스테이징 배포 완료*\n브랜치: `${{ github.ref_name }}` | SHA: `${{ env.IMAGE_TAG[:8] }}`\n배포자: ${{ github.actor }}\n<https://staging.sepang.kr|스테이징 확인>"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify Slack — failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "❌ *스테이징 배포 실패*\n브랜치: `${{ github.ref_name }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|로그 확인>"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+

@@ -1,0 +1,40 @@
+{
+  "name": "sepang-partner",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev":          "next dev -p 3001",
+    "build":        "next build",
+    "build:export": "cross-env CAPACITOR=true next build",
+    "start":        "next start",
+    "lint":         "next lint",
+    "typecheck":    "tsc --noEmit",
+    "cap:add:android": "cap add android",
+    "cap:add:ios":     "cap add ios",
+    "cap:sync":        "cap sync",
+    "cap:android":     "npm run build:export && cap sync && cap open android",
+    "cap:ios":         "npm run build:export && cap sync && cap open ios"
+  },
+  "dependencies": {
+    "next":                        "14.2.18",
+    "next-pwa":                    "^5.6.0",
+    "react":                       "^18.3.1",
+    "react-dom":                   "^18.3.1",
+    "@supabase/supabase-js":       "^2.46.2",
+    "@capacitor/core":             "^6.2.0",
+    "@capacitor/push-notifications": "^6.0.2",
+    "@capacitor/splash-screen":    "^6.0.2",
+    "@capacitor/status-bar":       "^6.0.1",
+    "@capacitor/geolocation":      "^6.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli":          "^6.2.0",
+    "cross-env":               "^7.0.3",
+    "typescript":              "^5.7.3",
+    "@types/node":             "^22.10.7",
+    "@types/react":            "^18.3.17",
+    "@types/react-dom":        "^18.3.5",
+    "eslint":                  "^9.17.0",
+    "eslint-config-next":      "14.2.18"
+  }
+}

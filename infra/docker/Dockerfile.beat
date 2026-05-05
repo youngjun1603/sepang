@@ -1,0 +1,19 @@
+# ============================================================
+# Dockerfile — Celery Beat (스케줄러, 단일 인스턴스)
+# ============================================================
+FROM python:3.12-slim AS builder
+WORKDIR /build
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+COPY 08_requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r 08_requirements.txt
+
+FROM python:3.12-slim AS runtime
+RUN groupadd -r sepang && useradd -r -g sepang sepang
+RUN apt-get update && apt-get install -y --no-install-recommends libpq5 && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /install /usr/local
+WORKDIR /app
+COPY --chown=sepang:sepang . .
+USER sepang
+ENV PYTHONUNBUFFERED=1
+
+CMD ["celery", "-A", "tasks", "beat", "--loglevel=info", "--pidfile=/tmp/celerybeat.pid"]

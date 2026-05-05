@@ -1,0 +1,199 @@
+# ============================================================
+# CD — Vercel + Supabase 배포
+# develop → Vercel Preview | main → Vercel Production
+# ============================================================
+name: CD — Vercel
+
+on:
+  push:
+    branches: [develop, main]
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # ── DB 마이그레이션 (Alembic → Supabase PostgreSQL) ─────────────
+  migrate:
+    name: "DB Migrations"
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+
+      - name: Install migration deps
+        run: pip install alembic asyncpg sqlalchemy geoalchemy2 pydantic-settings
+
+      - name: Run Alembic migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: alembic upgrade head
+
+  # ── 백엔드 (FastAPI → Vercel Python Serverless) ─────────────────
+  deploy-backend:
+    name: "Deploy Backend → Vercel"
+    runs-on: ubuntu-latest
+    needs: migrate
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}" }
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Deploy backend
+        working-directory: backend
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            vercel --token=${{ secrets.VERCEL_TOKEN }} --prod
+          else
+            vercel --token=${{ secrets.VERCEL_TOKEN }}
+          fi
+        env:
+          VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_BACKEND }}
+
+  # ── 고객 앱 (Next.js → Vercel) ────────────────────────────────
+  deploy-customer:
+    name: "Deploy Customer App → Vercel"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Deploy customer app
+        working-directory: frontend/customer
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            vercel --token=${{ secrets.VERCEL_TOKEN }} --prod
+          else
+            vercel --token=${{ secrets.VERCEL_TOKEN }}
+          fi
+        env:
+          VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_CUSTOMER }}
+
+  # ── 점주 앱 (Next.js → Vercel) ────────────────────────────────
+  deploy-partner:
+    name: "Deploy Partner App → Vercel"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Deploy partner app
+        working-directory: frontend/partner
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            vercel --token=${{ secrets.VERCEL_TOKEN }} --prod
+          else
+            vercel --token=${{ secrets.VERCEL_TOKEN }}
+          fi
+        env:
+          VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_PARTNER }}
+
+  # ── 관리자 앱 (Next.js → Vercel) ──────────────────────────────
+  deploy-admin:
+    name: "Deploy Admin App → Vercel"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Deploy admin app
+        working-directory: frontend/admin
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            vercel --token=${{ secrets.VERCEL_TOKEN }} --prod
+          else
+            vercel --token=${{ secrets.VERCEL_TOKEN }}
+          fi
+        env:
+          VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_ADMIN }}
+
+  # ── Supabase Edge Functions 배포 ──────────────────────────────
+  deploy-edge-functions:
+    name: "Deploy Edge Functions → Supabase"
+    runs-on: ubuntu-latest
+    if: github.ref_name == 'main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with: { version: latest }
+
+      - name: Deploy Edge Functions
+        run: |
+          supabase functions deploy send-sms --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+  # ── 스모크 테스트 ─────────────────────────────────────────────
+  smoke-test:
+    name: "Smoke test"
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-customer]
+    if: github.ref_name == 'main'
+    steps:
+      - name: Health check — API
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://api.sepang.kr/health)
+          [ "$STATUS" = "200" ] || (echo "API health check failed: $STATUS" && exit 1)
+          echo "API OK"
+
+      - name: Health check — Customer
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://sepang.kr)
+          [ "$STATUS" = "200" ] || (echo "Customer health check failed: $STATUS" && exit 1)
+          echo "Customer OK"
+
+      - name: Notify Slack — success
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "✅ *프로덕션 배포 완료*\nSHA: `${{ github.sha }}`\n배포자: ${{ github.actor }}\n<https://sepang.kr|고객앱> | <https://partner.sepang.kr|점주앱>"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify Slack — failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "❌ *배포 실패*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|로그 확인>"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

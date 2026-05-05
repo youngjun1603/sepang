@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Recurse -Force)",
+      "Bash(vercel --version)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(vercel whoami *)",
+      "Read(//c/Users/User/AppData/**)",
+      "Read(//c/Users/User/**)",
+      "Bash(curl -s -H 'Authorization: Bearer vca_8ZXY7nYumQZ5bWgK1dZX2jJgGmYAymA7rJgdeGOnnOtIK1hTt30hCf3p' https://api.vercel.com/v2/user)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('id:', d['user']['id']\\); print\\('username:', d['user']['username']\\)\")",
+      "Bash(curl -s -X POST 'https://api.vercel.com/v9/projects?teamId=team_JBhMZkd4FWWdIinWku39uvFQ' -H 'Authorization: Bearer vca_8ZXY7nYumQZ5bWgK1dZX2jJgGmYAymA7rJgdeGOnnOtIK1hTt30hCf3p' -H 'Content-Type: application/json' -d '{\"name\":\"sepang-api\",\"framework\":null}')",
+      "Bash(curl -s -X POST 'https://api.vercel.com/v9/projects?teamId=team_JBhMZkd4FWWdIinWku39uvFQ' -H 'Authorization: Bearer vca_8ZXY7nYumQZ5bWgK1dZX2jJgGmYAymA7rJgdeGOnnOtIK1hTt30hCf3p' -H 'Content-Type: application/json' -d '{\"name\":\"sepang-customer\",\"framework\":\"nextjs\"}')",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\(0,'utf8'\\); const j=JSON.parse\\(d\\); console.log\\('id:',j.id,'name:',j.name,'error:',j.error?.code\\)\")",
+      "Bash(vercel ls *)",
+      "Bash(git config *)"
+    ]
+  }
+}

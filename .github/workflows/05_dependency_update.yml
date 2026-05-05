@@ -1,0 +1,53 @@
+# ============================================================
+# 의존성 자동 업데이트 — 매주 월요일
+# ============================================================
+name: Dependency Update
+
+on:
+  schedule:
+    - cron: "0 1 * * mon"   # 매주 월 01:00 UTC (10:00 KST)
+  workflow_dispatch:
+
+jobs:
+  update-python:
+    name: "Update Python dependencies"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { token: "${{ secrets.BOT_TOKEN }}" }
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+
+      - name: Update pip-compile
+        run: |
+          pip install pip-tools
+          pip-compile --upgrade 08_requirements.in -o 08_requirements.txt
+
+      - name: Create PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token:          ${{ secrets.BOT_TOKEN }}
+          commit-message: "chore: update Python dependencies"
+          title:          "chore: update Python dependencies (auto)"
+          body:           "자동 생성된 의존성 업데이트 PR\n\n- `pip-compile --upgrade` 실행 결과"
+          branch:         "auto/python-deps-update"
+          labels:         "dependencies,automated"
+
+  update-node:
+    name: "Update Node dependencies"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { token: "${{ secrets.BOT_TOKEN }}" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npx npm-check-updates -u && npm install
+      - uses: peter-evans/create-pull-request@v6
+        with:
+          token:          ${{ secrets.BOT_TOKEN }}
+          commit-message: "chore: update Node dependencies"
+          title:          "chore: update Node dependencies (auto)"
+          branch:         "auto/node-deps-update"
+          labels:         "dependencies,automated"
+

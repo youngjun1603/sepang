@@ -1,0 +1,242 @@
+# ============================================================
+# CD Production — main 브랜치 → 프로덕션 배포 (승인 필요)
+# Blue/Green 배포 + 자동 롤백
+# ============================================================
+name: CD — Production
+
+on:
+  # AWS ECS 프로덕션 배포 비활성화 — Vercel로 이전됨 (02_cd_vercel.yml 참조)
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "배포할 이미지 태그 (기본: 최신 main SHA)"
+        required: false
+
+env:
+  AWS_REGION:   ap-northeast-2
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-northeast-2.amazonaws.com
+  IMAGE_TAG:    ${{ github.event.inputs.image_tag || github.sha }}
+
+jobs:
+  # ── 1단계: 릴리즈 준비 & 이미지 확인 ───────────────────────
+  prepare:
+    name: "Prepare release"
+    runs-on: ubuntu-latest
+    permissions: { id-token: write; contents: write }
+    outputs:
+      image_tag:     ${{ env.IMAGE_TAG }}
+      release_notes: ${{ steps.notes.outputs.notes }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sepang-github-actions-prod
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - name: Verify image exists in ECR
+        run: |
+          aws ecr describe-images \
+            --repository-name sepang-api \
+            --image-ids imageTag=${{ env.IMAGE_TAG }} \
+          || (echo "❌ Image ${{ env.IMAGE_TAG }} not found in ECR" && exit 1)
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log ${PREV_TAG}..HEAD --oneline --no-merges | head -20)
+          else
+            NOTES=$(git log --oneline --no-merges -10)
+          fi
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "v-${{ env.IMAGE_TAG }}"
+          name:     "Release ${{ env.IMAGE_TAG }}"
+          body:     ${{ steps.notes.outputs.notes }}
+          draft:    false
+
+  # ── 2단계: 운영팀 승인 대기 ────────────────────────────────
+  approval:
+    name: "Production approval"
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment:
+      name: production      # GitHub Environment protection rule (CODEOWNERS 설정)
+      url:  https://sepang.kr
+    steps:
+      - name: Approval gate
+        run: echo "✅ 프로덕션 배포 승인 완료"
+
+  # ── 3단계: DB 마이그레이션 ─────────────────────────────────
+  migrate:
+    name: "DB Migration"
+    needs: approval
+    runs-on: ubuntu-latest
+    permissions: { id-token: write; contents: read }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sepang-github-actions-prod
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - name: Run DB migration (ECS one-off task)
+        run: |
+          TASK_ARN=$(aws ecs run-task \
+            --cluster sepang-production \
+            --task-definition sepang-migrate-production \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={
+              subnets=[${{ secrets.PROD_PRIVATE_SUBNET_IDS }}],
+              securityGroups=[${{ secrets.PROD_ECS_SG }}],
+              assignPublicIp=DISABLED
+            }" \
+            --overrides '{"containerOverrides":[{"name":"api","command":["alembic","upgrade","head"]}]}' \
+            --query "tasks[0].taskArn" --output text)
+
+          echo "::notice::Migration task: $TASK_ARN"
+
+          aws ecs wait tasks-stopped \
+            --cluster sepang-production \
+            --tasks "$TASK_ARN"
+
+          EXIT=$(aws ecs describe-tasks \
+            --cluster sepang-production \
+            --tasks "$TASK_ARN" \
+            --query "tasks[0].containers[0].exitCode" --output text)
+
+          [ "$EXIT" = "0" ] || (echo "❌ Migration failed" && exit 1)
+
+  # ── 4단계: Blue/Green 프로덕션 배포 ────────────────────────
+  deploy:
+    name: "Blue/Green Deploy → Production"
+    needs: migrate
+    runs-on: ubuntu-latest
+    permissions: { id-token: write; contents: read }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/sepang-github-actions-prod
+          aws-region:     ${{ env.AWS_REGION }}
+
+      # API 서비스 Blue/Green
+      - name: Render API task definition
+        id: task-def-api
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ecs/task-def-api-production.json
+          container-name:  api
+          image:           ${{ env.ECR_REGISTRY }}/sepang-api:${{ env.IMAGE_TAG }}
+
+      - name: Deploy API (Blue/Green via CodeDeploy)
+        id: deploy-api
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition:             ${{ steps.task-def-api.outputs.task-definition }}
+          service:                     sepang-api-production
+          cluster:                     sepang-production
+          wait-for-service-stability:  true
+          codedeploy-appspec:          ecs/appspec-production.json
+          codedeploy-application:      sepang-production
+          codedeploy-deployment-group: sepang-api-production
+
+      # Celery worker 업데이트 (인플레이스, 상태 비저장)
+      - name: Render worker task definition
+        id: task-def-worker
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ecs/task-def-worker-production.json
+          container-name:  worker
+          image:           ${{ env.ECR_REGISTRY }}/sepang-worker:${{ env.IMAGE_TAG }}
+
+      - name: Deploy Celery worker
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition:            ${{ steps.task-def-worker.outputs.task-definition }}
+          service:                    sepang-worker-production
+          cluster:                    sepang-production
+          wait-for-service-stability: true
+
+      # ── 프로덕션 스모크 테스트 ───────────────────────────────
+      - name: Production smoke test
+        run: |
+          sleep 30
+          for ENDPOINT in \
+            "https://api.sepang.kr/health" \
+            "https://api.sepang.kr/api/v1/health/db" \
+            "https://api.sepang.kr/api/v1/health/redis"; do
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$ENDPOINT" || echo "000")
+            echo "$ENDPOINT → $STATUS"
+            [ "$STATUS" = "200" ] || (echo "❌ Smoke test failed: $ENDPOINT" && exit 1)
+          done
+          echo "✅ All production smoke tests passed"
+
+      # ── 자동 롤백 (스모크 실패 시) ───────────────────────────
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "🔄 스모크 테스트 실패 — 이전 버전으로 롤백 중..."
+          aws deploy stop-deployment \
+            --deployment-id $(aws deploy list-deployments \
+              --application-name sepang-production \
+              --deployment-group-name sepang-api-production \
+              --query "deployments[0]" --output text) \
+            --auto-rollback-enabled || true
+
+          aws ecs update-service \
+            --cluster sepang-production \
+            --service sepang-api-production \
+            --force-new-deployment
+
+      # ── Slack 알림 ─────────────────────────────────────────
+      - name: Slack — deploy success
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "blocks": [
+                {"type":"section","text":{"type":"mrkdwn","text":"🚀 *프로덕션 배포 완료*"}},
+                {"type":"section","fields":[
+                  {"type":"mrkdwn","text":"*버전*\n`${{ env.IMAGE_TAG }}`"},
+                  {"type":"mrkdwn","text":"*배포자*\n${{ github.actor }}"},
+                  {"type":"mrkdwn","text":"*시간*\n<!date^${{ github.event.head_commit.timestamp }}^{date_short_pretty} {time}|방금>"},
+                  {"type":"mrkdwn","text":"*상태*\n✅ 정상"}
+                ]},
+                {"type":"actions","elements":[
+                  {"type":"button","text":{"type":"plain_text","text":"서비스 확인"},"url":"https://sepang.kr"},
+                  {"type":"button","text":{"type":"plain_text","text":"모니터링"},"url":"https://monitoring.sepang.kr"}
+                ]}
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Slack — deploy failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "🚨 *프로덕션 배포 실패 — 자동 롤백 진행 중*\n버전: `${{ env.IMAGE_TAG }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|로그 확인>"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+

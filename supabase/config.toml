@@ -1,0 +1,47 @@
+# Supabase 로컬 개발 설정
+# supabase start 로 PostgreSQL + PostGIS + Realtime + Storage 실행
+# supabase db push 로 스키마 동기화
+
+[api]
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+port = 54323
+api_url = "http://localhost"
+
+[inbucket]
+port = 54324
+smtp_port = 54325
+pop3_port = 54326
+
+[storage]
+file_size_limit = "10MiB"
+
+[auth]
+site_url = "http://localhost:3000"
+additional_redirect_urls = [
+  "http://localhost:3001",
+  "http://localhost:3002",
+  "https://sepang.kr",
+  "https://partner.sepang.kr"
+]
+jwt_expiry = 3600
+refresh_token_rotation_enabled = true
+security_update_password_require_reauthentication = false
+
+[auth.email]
+enable_signup = false     # OTP 전용 — 이메일 회원가입 비활성화
+
+[realtime]
+enabled = true
+
+[analytics]
+enabled = false

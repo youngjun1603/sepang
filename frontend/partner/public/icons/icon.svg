@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#FFD600"/>
+  <!-- 가방+체크 아이콘 -->
+  <rect x="128" y="192" width="256" height="208" rx="20" fill="none" stroke="#1A1A1A" stroke-width="20"/>
+  <path d="M192 192 C192 140 320 140 320 192" fill="none" stroke="#1A1A1A" stroke-width="20" stroke-linecap="round"/>
+  <polyline points="192,300 232,340 320,252" fill="none" stroke="#1A1A1A" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

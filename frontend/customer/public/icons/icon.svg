@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0057FF"/>
+  <!-- 세탁기 아이콘 -->
+  <rect x="128" y="112" width="256" height="288" rx="24" fill="none" stroke="white" stroke-width="20"/>
+  <circle cx="256" cy="280" r="88" fill="none" stroke="white" stroke-width="20"/>
+  <circle cx="256" cy="280" r="44" fill="none" stroke="white" stroke-width="14" stroke-dasharray="30 20"/>
+  <rect x="152" y="136" width="20" height="20" rx="4" fill="white"/>
+  <rect x="186" y="136" width="20" height="20" rx="4" fill="white"/>
+  <line x1="152" y1="192" x2="360" y2="192" stroke="white" stroke-width="14"/>
+</svg>

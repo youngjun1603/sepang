@@ -1,0 +1,35 @@
+{
+  "family": "sepang-api-production",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "2048",
+  "memory": "4096",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "PLACEHOLDER_IMAGE",
+      "essential": true,
+      "portMappings": [{ "containerPort": 8000, "protocol": "tcp" }],
+      "environment": [
+        { "name": "ENVIRONMENT", "value": "production" }
+      ],
+      "secrets": [
+        { "name": "DATABASE_URL", "valueFrom": "/sepang/production/database-url" },
+        { "name": "REDIS_URL",    "valueFrom": "/sepang/production/redis-url" },
+        { "name": "JWT_SECRET",   "valueFrom": "/sepang/production/jwt-secret" }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
+        "interval": 15, "timeout": 5, "retries": 3, "startPeriod": 30
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group":         "/ecs/sepang/production",
+          "awslogs-region":        "ap-northeast-2",
+          "awslogs-stream-prefix": "api"
+        }
+      }
+    }
+  ]
+}
