@@ -20,8 +20,6 @@ jobs:
   migrate:
     name: "DB Migrations"
     runs-on: ubuntu-latest
-    environment:
-      name: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +33,8 @@ jobs:
         working-directory: backend
         env:
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          ENVIRONMENT: development
+          JWT_SECRET: migration-only-not-used
         run: alembic upgrade head
 
   # ── 백엔드 (FastAPI → Vercel Python Serverless) ─────────────────

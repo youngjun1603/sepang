@@ -34,11 +34,9 @@ additional_redirect_urls = [
   "https://partner.sepang.kr"
 ]
 jwt_expiry = 3600
-refresh_token_rotation_enabled = true
-security_update_password_require_reauthentication = false
 
 [auth.email]
-enable_signup = false     # OTP 전용 — 이메일 회원가입 비활성화
+enable_signup = false
 
 [realtime]
 enabled = true
