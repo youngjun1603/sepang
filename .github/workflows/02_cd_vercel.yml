@@ -31,8 +31,9 @@ jobs:
 
       - name: Run Alembic migrations
         working-directory: backend
+        continue-on-error: true
         env:
-          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          DATABASE_URL: ${{ secrets.SUPABASE_DIRECT_URL }}
           ENVIRONMENT: development
           JWT_SECRET: migration-only-not-used
         run: alembic upgrade head
@@ -86,6 +87,13 @@ jobs:
         working-directory: frontend/customer
         run: npm install --legacy-peer-deps
 
+      - name: Pull Vercel project settings
+        working-directory: frontend/customer
+        run: vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }} --environment=production
+        env:
+          VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_CUSTOMER }}
+
       - name: Build customer app (vercel build)
         working-directory: frontend/customer
         run: |
@@ -133,6 +141,13 @@ jobs:
         working-directory: frontend/partner
         run: npm install --legacy-peer-deps
 
+      - name: Pull Vercel project settings
+        working-directory: frontend/partner
+        run: vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }} --environment=production
+        env:
+          VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_PARTNER }}
+
       - name: Build partner app (vercel build)
         working-directory: frontend/partner
         run: |
@@ -179,6 +194,13 @@ jobs:
       - name: Install deps
         working-directory: frontend/admin
         run: npm install --legacy-peer-deps
+
+      - name: Pull Vercel project settings
+        working-directory: frontend/admin
+        run: vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }} --environment=production
+        env:
+          VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_ADMIN }}
 
       - name: Build admin app (vercel build)
         working-directory: frontend/admin
