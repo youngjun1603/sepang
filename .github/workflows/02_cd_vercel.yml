@@ -66,6 +66,7 @@ jobs:
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_BACKEND }}
 
   # ── 고객 앱 (Next.js → Vercel) ────────────────────────────────
+  # 빌드는 GitHub Actions에서 수행 (shared lib 접근 가능), prebuilt artifact를 Vercel에 업로드
   deploy-customer:
     name: "Deploy Customer App → Vercel"
     runs-on: ubuntu-latest
@@ -81,13 +82,32 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
 
-      - name: Deploy customer app
+      - name: Install deps
+        working-directory: frontend/customer
+        run: npm install --legacy-peer-deps
+
+      - name: Build customer app (vercel build)
         working-directory: frontend/customer
         run: |
           if [ "${{ github.ref_name }}" = "main" ]; then
-            vercel --token=${{ secrets.VERCEL_TOKEN }} --prod
+            vercel build --token=${{ secrets.VERCEL_TOKEN }} --prod
           else
-            vercel --token=${{ secrets.VERCEL_TOKEN }}
+            vercel build --token=${{ secrets.VERCEL_TOKEN }}
+          fi
+        env:
+          VERCEL_ORG_ID:              ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID:          ${{ secrets.VERCEL_PROJECT_ID_CUSTOMER }}
+          NEXT_PUBLIC_SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_API_URL:        https://sepang-api.vercel.app
+
+      - name: Deploy prebuilt
+        working-directory: frontend/customer
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }} --prod
+          else
+            vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }}
           fi
         env:
           VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
@@ -109,13 +129,32 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
 
-      - name: Deploy partner app
+      - name: Install deps
+        working-directory: frontend/partner
+        run: npm install --legacy-peer-deps
+
+      - name: Build partner app (vercel build)
         working-directory: frontend/partner
         run: |
           if [ "${{ github.ref_name }}" = "main" ]; then
-            vercel --token=${{ secrets.VERCEL_TOKEN }} --prod
+            vercel build --token=${{ secrets.VERCEL_TOKEN }} --prod
           else
-            vercel --token=${{ secrets.VERCEL_TOKEN }}
+            vercel build --token=${{ secrets.VERCEL_TOKEN }}
+          fi
+        env:
+          VERCEL_ORG_ID:              ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID:          ${{ secrets.VERCEL_PROJECT_ID_PARTNER }}
+          NEXT_PUBLIC_SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_API_URL:        https://sepang-api.vercel.app
+
+      - name: Deploy prebuilt
+        working-directory: frontend/partner
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }} --prod
+          else
+            vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }}
           fi
         env:
           VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
@@ -137,13 +176,32 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
 
-      - name: Deploy admin app
+      - name: Install deps
+        working-directory: frontend/admin
+        run: npm install --legacy-peer-deps
+
+      - name: Build admin app (vercel build)
         working-directory: frontend/admin
         run: |
           if [ "${{ github.ref_name }}" = "main" ]; then
-            vercel --token=${{ secrets.VERCEL_TOKEN }} --prod
+            vercel build --token=${{ secrets.VERCEL_TOKEN }} --prod
           else
-            vercel --token=${{ secrets.VERCEL_TOKEN }}
+            vercel build --token=${{ secrets.VERCEL_TOKEN }}
+          fi
+        env:
+          VERCEL_ORG_ID:              ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID:          ${{ secrets.VERCEL_PROJECT_ID_ADMIN }}
+          NEXT_PUBLIC_SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_API_URL:        https://sepang-api.vercel.app
+
+      - name: Deploy prebuilt
+        working-directory: frontend/admin
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }} --prod
+          else
+            vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }}
           fi
         env:
           VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
