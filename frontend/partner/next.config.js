@@ -1,4 +1,4 @@
-const withPWA = require("next-pwa")({
+const withPWA = require("@ducanh2912/next-pwa").default({
   dest: "public",
   register: true,
   skipWaiting: true,
@@ -8,7 +8,6 @@ const withPWA = require("next-pwa")({
   },
   runtimeCaching: [
     {
-      // 실시간 주문 API — 캐시 없음
       urlPattern: /^https:\/\/api\.sepang\.kr\/.*/i,
       handler: "NetworkOnly",
     },
