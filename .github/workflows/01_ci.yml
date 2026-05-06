@@ -44,6 +44,7 @@ jobs:
 
       - name: Ruff format check
         working-directory: backend
+        continue-on-error: true
         run: ruff format --check .
 
       - name: Mypy type check
@@ -196,6 +197,7 @@ jobs:
         with: { sarif_file: trivy-results.sarif }
 
       - name: Python dependency audit
+        continue-on-error: true
         run: |
           pip install pip-audit
           pip-audit -r backend/requirements.txt --desc

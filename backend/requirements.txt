@@ -14,7 +14,7 @@ alembic==1.14.0           # DB 마이그레이션
 geoalchemy2==0.17.0       # PostGIS 타입 지원
 
 # Auth
-pyjwt==2.10.1
+pyjwt==2.12.0
 bcrypt==4.2.1
 pyotp==2.9.0              # TOTP (관리자 2FA)
 
@@ -27,7 +27,7 @@ firebase-admin==6.6.0     # FCM
 pywebpush==2.0.0          # Web Push VAPID
 
 # Utils
-python-multipart==0.0.20  # 파일 업로드
+python-multipart==0.0.22  # 파일 업로드
 Pillow==11.1.0             # 이미지 처리
 
 # Rate Limiting
