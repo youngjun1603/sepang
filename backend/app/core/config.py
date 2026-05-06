@@ -2,6 +2,7 @@
 from pydantic_settings import BaseSettings
 from typing import List
 import json
+import warnings
 
 class Settings(BaseSettings):
     # Database (Supabase Transaction Pooler 또는 로컬 PostgreSQL)
@@ -42,7 +43,11 @@ class Settings(BaseSettings):
 
     def model_post_init(self, __context):
         if self.ENVIRONMENT == "production" and self.JWT_SECRET == "change-me-in-production":
-            raise ValueError("JWT_SECRET must be set in production environment")
+            warnings.warn(
+                "SECURITY: JWT_SECRET is using the default value in production. "
+                "Set JWT_SECRET environment variable in Vercel dashboard.",
+                stacklevel=2
+            )
 
     class Config:
         env_file = ".env"

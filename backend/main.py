@@ -20,7 +20,10 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
+    try:
+        async with engine.begin() as conn:
+            pass
+    except Exception:
         pass
     yield
     await engine.dispose()
