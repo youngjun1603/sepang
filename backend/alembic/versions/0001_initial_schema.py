@@ -21,7 +21,7 @@ def upgrade() -> None:
     op.execute('CREATE EXTENSION IF NOT EXISTS "postgis"')
     op.execute('CREATE EXTENSION IF NOT EXISTS "pg_trgm"')
 
-    # ENUMs
+    # ENUMs — idempotent (DO block catches duplicate_object)
     for name, values in [
         ("user_role",         "CUSTOMER,PARTNER,ADMIN"),
         ("service_type",      "DAY,NIGHT"),
@@ -34,7 +34,12 @@ def upgrade() -> None:
         ("wash_category",     "CLOTHES_30L,CLOTHES_50L,BLANKET,SHOES"),
     ]:
         vals = ",".join(f"'{v}'" for v in values.split(","))
-        op.execute(f"CREATE TYPE {name} AS ENUM ({vals})")
+        op.execute(f"""
+            DO $$ BEGIN
+                CREATE TYPE {name} AS ENUM ({vals});
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        """)
 
     # users
     op.create_table("users",

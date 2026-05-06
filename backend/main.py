@@ -3,9 +3,8 @@
 ──────────────────────────────────
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 """
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -13,9 +12,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
-from app.core.database import engine, Base
+from app.core.database import engine
 from app.api.v1 import router as api_v1_router
-from app.ws import websocket_router
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
@@ -49,5 +47,4 @@ app.add_middleware(
 )
 
 app.include_router(api_v1_router, prefix="/api/v1")
-app.include_router(websocket_router)
 
