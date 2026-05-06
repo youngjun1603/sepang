@@ -150,7 +150,7 @@ jobs:
         with:
           payload: |
             {
-              "text": "✅ *스테이징 배포 완료*\n브랜치: `${{ github.ref_name }}` | SHA: `${{ env.IMAGE_TAG[:8] }}`\n배포자: ${{ github.actor }}\n<https://staging.sepang.kr|스테이징 확인>"
+              "text": "✅ *스테이징 배포 완료*\n브랜치: `${{ github.ref_name }}` | SHA: `${{ env.IMAGE_TAG }}`\n배포자: ${{ github.actor }}\n<https://staging.sepang.kr|스테이징 확인>"
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
