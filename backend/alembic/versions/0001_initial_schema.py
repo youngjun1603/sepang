@@ -6,7 +6,7 @@ Create Date: 2026-03-18
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID, JSONB, ENUM as PG_ENUM
 from geoalchemy2 import Geography
 
 revision = "0001"
@@ -44,7 +44,7 @@ def upgrade() -> None:
     # users
     op.create_table("users",
         sa.Column("id",              UUID(as_uuid=True), primary_key=True, server_default=sa.text("uuid_generate_v4()")),
-        sa.Column("role",            sa.Enum("CUSTOMER","PARTNER","ADMIN", name="user_role", create_type=False), nullable=False),
+        sa.Column("role",            PG_ENUM(name="user_role", create_type=False), nullable=False),
         sa.Column("name",            sa.String(50),  nullable=False),
         sa.Column("phone",           sa.String(20),  nullable=False, unique=True),
         sa.Column("email",           sa.String(255), unique=True),
@@ -66,7 +66,7 @@ def upgrade() -> None:
         sa.Column("name",         sa.String(100), nullable=False),
         sa.Column("address",      sa.Text, nullable=False),
         sa.Column("location",     Geography("POINT", srid=4326), nullable=False),
-        sa.Column("team_type",    sa.Enum("DAY","NIGHT","BOTH", name="team_type", create_type=False), nullable=False, server_default="'DAY'"),
+        sa.Column("team_type",    PG_ENUM(name="team_type", create_type=False), nullable=False, server_default="'DAY'"),
         sa.Column("radius_km",    sa.Numeric(4,1), nullable=False, server_default="3.0"),
         sa.Column("rating",       sa.Numeric(3,2), nullable=False, server_default="5.0"),
         sa.Column("review_count", sa.Integer, nullable=False, server_default="0"),
@@ -87,9 +87,9 @@ def upgrade() -> None:
         sa.Column("id",               UUID(as_uuid=True), primary_key=True, server_default=sa.text("uuid_generate_v4()")),
         sa.Column("customer_id",      UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("shop_id",          UUID(as_uuid=True), sa.ForeignKey("shops.id")),
-        sa.Column("service_type",     sa.Enum("DAY","NIGHT", name="service_type", create_type=False), nullable=False),
-        sa.Column("wash_category",    sa.Enum("CLOTHES_30L","CLOTHES_50L","BLANKET","SHOES", name="wash_category", create_type=False), nullable=False),
-        sa.Column("status",           sa.Enum("PENDING","ACCEPTED","PICKED_UP","WASHING","DRYING","DELIVERING","COMPLETED","CANCELLED", name="order_status", create_type=False), nullable=False, server_default="'PENDING'"),
+        sa.Column("service_type",     PG_ENUM(name="service_type", create_type=False), nullable=False),
+        sa.Column("wash_category",    PG_ENUM(name="wash_category", create_type=False), nullable=False),
+        sa.Column("status",           PG_ENUM(name="order_status", create_type=False), nullable=False, server_default="'PENDING'"),
         sa.Column("pickup_address",   sa.Text, nullable=False),
         sa.Column("pickup_location",  Geography("POINT", srid=4326), nullable=False),
         sa.Column("delivery_address", sa.Text, nullable=False),
@@ -121,8 +121,8 @@ def upgrade() -> None:
     op.create_table("order_status_history",
         sa.Column("id",         sa.BigInteger, primary_key=True, autoincrement=True),
         sa.Column("order_id",   UUID(as_uuid=True), sa.ForeignKey("orders.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("old_status", sa.Enum("PENDING","ACCEPTED","PICKED_UP","WASHING","DRYING","DELIVERING","COMPLETED","CANCELLED", name="order_status", create_type=False)),
-        sa.Column("new_status", sa.Enum("PENDING","ACCEPTED","PICKED_UP","WASHING","DRYING","DELIVERING","COMPLETED","CANCELLED", name="order_status", create_type=False), nullable=False),
+        sa.Column("old_status", PG_ENUM(name="order_status", create_type=False)),
+        sa.Column("new_status", PG_ENUM(name="order_status", create_type=False), nullable=False),
         sa.Column("changed_by", UUID(as_uuid=True), sa.ForeignKey("users.id")),
         sa.Column("note",       sa.Text),
         sa.Column("created_at", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("NOW()")),
@@ -133,7 +133,7 @@ def upgrade() -> None:
         sa.Column("id",          UUID(as_uuid=True), primary_key=True, server_default=sa.text("uuid_generate_v4()")),
         sa.Column("order_id",    UUID(as_uuid=True), sa.ForeignKey("orders.id", ondelete="CASCADE"), nullable=False),
         sa.Column("uploader_id", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("photo_type",  sa.Enum("PICKUP","DELIVERY","ISSUE", name="photo_type", create_type=False), nullable=False),
+        sa.Column("photo_type",  PG_ENUM(name="photo_type", create_type=False), nullable=False),
         sa.Column("s3_key",      sa.Text, nullable=False),
         sa.Column("s3_bucket",   sa.Text, nullable=False, server_default="'sepang-photos'"),
         sa.Column("taken_at",    sa.TIMESTAMP(timezone=True)),
@@ -154,7 +154,7 @@ def upgrade() -> None:
         sa.Column("net_payout",   sa.Integer, nullable=False, server_default="0"),
         sa.Column("payout_date",  sa.Date),
         sa.Column("paid_at",      sa.TIMESTAMP(timezone=True)),
-        sa.Column("status",       sa.Enum("PENDING","PROCESSING","COMPLETED","FAILED", name="settlement_status", create_type=False), nullable=False, server_default="'PENDING'"),
+        sa.Column("status",       PG_ENUM(name="settlement_status", create_type=False), nullable=False, server_default="'PENDING'"),
         sa.Column("transfer_ref", sa.String(100)),
         sa.Column("created_at",   sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.Column("updated_at",   sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("NOW()")),
@@ -212,7 +212,7 @@ def upgrade() -> None:
         sa.Column("id",          sa.BigInteger, primary_key=True, autoincrement=True),
         sa.Column("user_id",     UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("order_id",    UUID(as_uuid=True), sa.ForeignKey("orders.id")),
-        sa.Column("type",        sa.Enum("FCM","KAKAO","SMS", name="notification_type", create_type=False), nullable=False),
+        sa.Column("type",        PG_ENUM(name="notification_type", create_type=False), nullable=False),
         sa.Column("title",       sa.String(200), nullable=False),
         sa.Column("body",        sa.Text, nullable=False),
         sa.Column("sent_at",     sa.TIMESTAMP(timezone=True)),
@@ -232,7 +232,7 @@ def upgrade() -> None:
         sa.Column("message_title", sa.String(200), nullable=False),
         sa.Column("message_body",  sa.Text, nullable=False),
         sa.Column("coupon_id",     UUID(as_uuid=True), sa.ForeignKey("coupons.id")),
-        sa.Column("status",        sa.Enum("WAITING","SCHEDULED","SENT","FAILED", name="crm_status", create_type=False), nullable=False, server_default="'WAITING'"),
+        sa.Column("status",        PG_ENUM(name="crm_status", create_type=False), nullable=False, server_default="'WAITING'"),
         sa.Column("scheduled_at",  sa.TIMESTAMP(timezone=True)),
         sa.Column("sent_count",    sa.Integer, nullable=False, server_default="0"),
         sa.Column("created_at",    sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("NOW()")),
