@@ -1,3 +1,4 @@
+const path = require("path");
 const withPWA = require("@ducanh2912/next-pwa").default({
   dest: "public",
   register: true,
@@ -30,6 +31,14 @@ const nextConfig = {
   output: process.env.CAPACITOR === "true" ? "export" : undefined,
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
+  webpack: (config, { defaultLoaders }) => {
+    config.module.rules.push({
+      test: /\.(ts|tsx)$/,
+      include: [path.resolve(__dirname, "../../shared")],
+      use: [defaultLoaders.babel],
+    });
+    return config;
+  },
 };
 
 module.exports = withPWA(nextConfig);
