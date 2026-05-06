@@ -36,7 +36,7 @@ jobs:
           key: pip-${{ hashFiles('backend/requirements.txt') }}
 
       - name: Install dev deps
-        run: pip install ruff mypy types-bcrypt types-jwt -r backend/requirements.txt
+        run: pip install ruff mypy -r backend/requirements.txt
 
       - name: Ruff lint
         working-directory: backend
@@ -151,7 +151,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+        with:
+          node-version: "${{ env.NODE_VERSION }}"
+          cache: npm
+          cache-dependency-path: frontend/customer/package-lock.json
       - name: Install customer deps
         working-directory: frontend/customer
         run: npm ci
