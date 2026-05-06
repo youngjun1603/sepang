@@ -23,7 +23,7 @@ async def get_current_user(
         )
         if payload.get("type") != "access":
             raise ValueError("Invalid token type")
-        return CurrentUser(id=payload["sub"], role=payload["role"])
+        return CurrentUser(id=payload["sub"], role=payload["role"], shop_id=payload.get("shop_id"))
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, ValueError):
         raise HTTPException(status_code=401, detail="인증이 필요합니다")
 

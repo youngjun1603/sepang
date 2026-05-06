@@ -17,7 +17,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 import jwt
 import pyotp               # TOTP (관리자 2FA)
 import bcrypt
@@ -65,13 +65,12 @@ class AdminOTPRequest(BaseModel):
 
 # ── JWT Helpers ────────────────────────────────────────────────────────────────
 
-def create_access_token(user_id: str, role: str) -> str:
+def create_access_token(user_id: str, role: str, shop_id: Optional[str] = None) -> str:
     exp = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    return jwt.encode(
-        {"sub": user_id, "role": role, "exp": exp, "type": "access"},
-        settings.JWT_SECRET,
-        algorithm=JWT_ALGORITHM,
-    )
+    payload: dict = {"sub": user_id, "role": role, "exp": exp, "type": "access"}
+    if shop_id:
+        payload["shop_id"] = shop_id
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 def create_refresh_token(user_id: str) -> str:
     exp = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
@@ -235,7 +234,7 @@ async def partner_login(request: Request, req: PartnerLoginRequest, db: AsyncSes
     await db.commit()
 
     return {
-        "access_token":  create_access_token(str(user.id), "PARTNER"),
+        "access_token":  create_access_token(str(user.id), "PARTNER", str(user.shop_id)),
         "refresh_token": create_refresh_token(str(user.id)),
         "shop_id":       str(user.shop_id),
     }

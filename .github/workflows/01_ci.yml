@@ -39,12 +39,15 @@ jobs:
         run: pip install ruff mypy types-bcrypt types-jwt -r backend/requirements.txt
 
       - name: Ruff lint
+        working-directory: backend
         run: ruff check . --output-format=github
 
       - name: Ruff format check
+        working-directory: backend
         run: ruff format --check .
 
       - name: Mypy type check
+        working-directory: backend
         run: mypy app/ --ignore-missing-imports --strict
 
   # ── 2. 단위 테스트 (DB 없이 빠르게) ────────────────────────
@@ -58,6 +61,7 @@ jobs:
       - name: Install deps
         run: pip install pytest pytest-asyncio pyjwt bcrypt pyotp
       - name: Run unit tests
+        working-directory: backend
         run: pytest tests/unit/ -v --tb=short --junit-xml=test-results/unit.xml
       - name: Upload results
         if: always()
@@ -81,10 +85,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports: ["6379:6379"]
-        options: --health-cmd "redis-cli ping" --health-interval 10s
 
     steps:
       - uses: actions/checkout@v4
@@ -95,17 +95,20 @@ jobs:
         run: pip install -r backend/requirements.txt pytest pytest-asyncio httpx pyjwt
 
       - name: Run Alembic migrations
+        working-directory: backend
         env:
           DATABASE_URL: postgresql+asyncpg://sepang:test-password@localhost:5432/sepang_test
+          ENVIRONMENT: development
+          JWT_SECRET: test-secret-key
         run: alembic upgrade head
 
       - name: Run integration tests
+        working-directory: backend
         env:
           TEST_DATABASE_URL: postgresql+asyncpg://sepang:test-password@localhost:5432/sepang_test
-          REDIS_URL:         redis://localhost:6379/0
+          DATABASE_URL:      postgresql+asyncpg://sepang:test-password@localhost:5432/sepang_test
           JWT_SECRET:        test-secret-key
-          S3_BUCKET:         sepang-photos-test
-          AWS_DEFAULT_REGION: ap-northeast-2
+          ENVIRONMENT:       development
         run: |
           pytest tests/integration/ -v --tb=short \
             --junit-xml=test-results/integration.xml \
@@ -124,12 +127,22 @@ jobs:
   frontend-typecheck:
     name: "Frontend — TypeScript"
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [customer, partner, admin]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
-      - run: npm ci
-      - run: npx tsc --noEmit
+        with:
+          node-version: "${{ env.NODE_VERSION }}"
+          cache: npm
+          cache-dependency-path: frontend/${{ matrix.app }}/package-lock.json
+      - name: Install deps (${{ matrix.app }})
+        working-directory: frontend/${{ matrix.app }}
+        run: npm ci --legacy-peer-deps
+      - name: TypeScript check (${{ matrix.app }})
+        working-directory: frontend/${{ matrix.app }}
+        run: npm run typecheck
 
   # ── 5. E2E 테스트 (Playwright) ────────────────────────────
   e2e-tests:
