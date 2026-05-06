@@ -22,7 +22,7 @@ jobs:
   prepare:
     name: "Prepare release"
     runs-on: ubuntu-latest
-    permissions: { id-token: write; contents: write }
+    permissions: { id-token: write, contents: write }
     outputs:
       image_tag:     ${{ env.IMAGE_TAG }}
       release_notes: ${{ steps.notes.outputs.notes }}
@@ -82,7 +82,7 @@ jobs:
     name: "DB Migration"
     needs: approval
     runs-on: ubuntu-latest
-    permissions: { id-token: write; contents: read }
+    permissions: { id-token: write, contents: read }
 
     steps:
       - uses: actions/checkout@v4
@@ -125,7 +125,7 @@ jobs:
     name: "Blue/Green Deploy → Production"
     needs: migrate
     runs-on: ubuntu-latest
-    permissions: { id-token: write; contents: read }
+    permissions: { id-token: write, contents: read }
 
     steps:
       - uses: actions/checkout@v4
