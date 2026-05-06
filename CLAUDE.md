@@ -84,8 +84,27 @@ NEXT_PUBLIC_API_URL           https://sepang-api.vercel.app
 ```
 
 ### GitHub Secrets
-`VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID_BACKEND/CUSTOMER/PARTNER/ADMIN`
-`SUPABASE_DB_URL, SUPABASE_PROJECT_REF, SUPABASE_ACCESS_TOKEN`
+```
+# Vercel 배포
+VERCEL_TOKEN                  vercel.com/account/tokens 에서 발급한 PAT
+VERCEL_ORG_ID                 team_JBhMZkd4FWWdIinWku39uvFQ
+VERCEL_PROJECT_ID_BACKEND     prj_2pECSbwJ4BMy4iM7R9mp2XI1XSSc
+VERCEL_PROJECT_ID_CUSTOMER    prj_q9hn6s3gExBIBH5xckqSgvKHVBWv
+VERCEL_PROJECT_ID_PARTNER     prj_Ynt1tle9JFSmwm3A1T3dLJwOAY6v
+VERCEL_PROJECT_ID_ADMIN       prj_q40A5Llde4FWxYnal6JHNVWO5Hj0
+
+# Supabase — DB 마이그레이션 (Direct URL, port 5432, not pooler 6543)
+SUPABASE_DIRECT_URL           postgresql+asyncpg://postgres.[REF]:[PW]@db.apghgbecayjfsuswaggf.supabase.co:5432/postgres
+SUPABASE_PROJECT_REF          apghgbecayjfsuswaggf
+SUPABASE_ACCESS_TOKEN         Supabase 대시보드 Account > Access Tokens
+
+# Supabase — 프론트엔드 빌드 주입
+SUPABASE_URL                  https://apghgbecayjfsuswaggf.supabase.co
+SUPABASE_ANON_KEY             sb_publishable_...
+
+# 선택
+SLACK_WEBHOOK_URL             배포 알림 (없어도 continue-on-error)
+```
 
 ## 주요 API 엔드포인트
 

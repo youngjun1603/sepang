@@ -2,19 +2,15 @@
   "version": 2,
   "builds": [
     {
-      "src": "app/main.py",
+      "src": "main.py",
       "use": "@vercel/python",
       "config": { "maxLambdaSize": "50mb" }
     }
   ],
   "routes": [
     {
-      "src": "/ws/(.*)",
-      "dest": "https://realtime.supabase.co/$1"
-    },
-    {
       "src": "/(.*)",
-      "dest": "app/main.py"
+      "dest": "main.py"
     }
   ],
   "env": {
