@@ -6,7 +6,7 @@
  * ╚══════════════════════════════════════════════════════════╝
  */
 import { useState, useEffect, createContext, useContext, useCallback } from "react";
-import { adminApi, authApi, tokenStore } from "../../shared/lib/api-client";
+import { adminApi, authApi, tokenStore } from "@sepang/shared/lib/api-client";
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 const RouterCtx = createContext({});

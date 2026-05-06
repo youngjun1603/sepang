@@ -20,6 +20,7 @@
     "cap:ios":         "npm run build:export && cap sync && cap open ios"
   },
   "dependencies": {
+    "@sepang/shared":              "file:../shared",
     "next":                        "14.2.18",
     "@ducanh2912/next-pwa":        "^10.2.9",
     "react":                       "^18.3.1",

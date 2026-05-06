@@ -1,0 +1,7 @@
+{
+  "name": "@sepang/shared",
+  "version": "1.0.0",
+  "private": true,
+  "main": "lib/api-client.ts",
+  "types": "lib/api-client.ts"
+}

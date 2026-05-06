@@ -4,7 +4,7 @@
  * 배포: Next.js PWA / Capacitor
  */
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
-import { authApi, orderApi, reviewApi, geocodeApi, pointsApi, tokenStore, createOrderTrackingSocket } from "../../shared/lib/api-client";
+import { authApi, orderApi, reviewApi, geocodeApi, pointsApi, tokenStore, createOrderTrackingSocket } from "@sepang/shared/lib/api-client";
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 const RouterCtx = createContext({});

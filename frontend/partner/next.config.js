@@ -31,12 +31,9 @@ const nextConfig = {
   output: process.env.CAPACITOR === "true" ? "export" : undefined,
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
-  webpack: (config, { defaultLoaders }) => {
-    config.module.rules.push({
-      test: /\.(ts|tsx)$/,
-      include: [path.resolve(__dirname, "../../shared")],
-      use: [defaultLoaders.babel],
-    });
+  transpilePackages: ["@sepang/shared"],
+  webpack: (config) => {
+    config.resolve.modules.push(path.resolve(__dirname, "node_modules"));
     return config;
   },
 };
