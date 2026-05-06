@@ -114,7 +114,7 @@ async def create_order(
                 base_amount, discount_amount, total_amount,
                 platform_fee, coupon_id, customer_note
             ) VALUES (
-                :customer_id, :service_type::service_type, :wash_category::wash_category,
+                :customer_id, CAST(:service_type AS service_type), CAST(:wash_category AS wash_category),
                 :pickup_address,  ST_SetSRID(ST_MakePoint(:pickup_lng, :pickup_lat), 4326),
                 :delivery_address, ST_SetSRID(ST_MakePoint(:delivery_lng, :delivery_lat), 4326),
                 :base_amount, :discount, :total,
@@ -214,7 +214,7 @@ async def update_order_status(
 
     ts_set = f", {ts_col} = NOW()" if ts_col else ""
     await db.execute(
-        text(f"UPDATE orders SET status = :s::order_status{ts_set}, updated_at = NOW() WHERE id = :id"),
+        text(f"UPDATE orders SET status = CAST(:s AS order_status){ts_set}, updated_at = NOW() WHERE id = :id"),
         {"s": req.new_status.value, "id": order_id}
     )
     await db.commit()
@@ -265,7 +265,7 @@ async def upload_order_photo(
     await db.execute(
         text("""
             INSERT INTO order_photos (order_id, uploader_id, photo_type, s3_key, s3_bucket)
-            VALUES (:order_id, :uploader_id, :photo_type::photo_type, :s3_key, :bucket)
+            VALUES (:order_id, :uploader_id, CAST(:photo_type AS photo_type), :s3_key, :bucket)
         """),
         {
             "order_id":    order_id,
@@ -289,7 +289,7 @@ async def get_nearby_orders(
     점주 반경 내 대기 주문 목록 (PostGIS)
     """
     result = await db.execute(
-        text("SELECT * FROM get_nearby_orders(:shop_id, 30)"),
+        text("SELECT * FROM get_nearby_orders(:shop_id, 3)"),
         {"shop_id": current_user.shop_id}
     )
     rows = result.fetchall()

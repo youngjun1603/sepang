@@ -221,7 +221,7 @@ async def partner_login(request: Request, req: PartnerLoginRequest, db: AsyncSes
         {"bn": req.business_number}
     )
     user = result.fetchone()
-    if not user or not user.is_active:
+    if not user or not user.is_active or not user.password_hash:
         raise HTTPException(401, "사업자번호 또는 비밀번호가 올바르지 않습니다")
 
     if not bcrypt.checkpw(req.password.encode(), user.password_hash.encode()):
