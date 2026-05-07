@@ -283,17 +283,18 @@ export interface Settlement {
 }
 
 export interface Shop {
-  id: string; name: string; address: string; team_type: string;
-  rating: number; review_count: number; is_active: boolean; is_available: boolean;
+  id: string; name: string; region: string; team_type: string;
+  today_orders: number; rating: number; is_active: boolean; is_available: boolean;
 }
 
 export interface DashboardKpi {
   today_orders: number; conversion_rate: number;
   avg_order_value: number; sla_violations: number;
+  week_revenue: number; active_shops: number;
 }
 
 export interface SlaOrder extends Order { hours_left: number; shop_name?: string; customer_phone: string; }
-export interface AuditLog { id: number; admin_id: string; ip_address: string; path: string; action: string; created_at: string; }
+export interface AuditLog { id: number; admin_email: string; ip_address: string; path: string; action: string; created_at: string; }
 export interface PaginatedResponse<T> { items: T[]; total: number; page: number; pages: number; }
 
 export interface CreateOrderRequest {

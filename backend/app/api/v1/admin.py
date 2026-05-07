@@ -150,7 +150,7 @@ async def list_orders(
     where = "WHERE 1=1"
     params: dict = {"limit": page_size, "offset": (page - 1) * page_size}
     if status:
-        where += " AND o.status = :status::order_status"
+        where += " AND o.status = CAST(:status AS order_status)"
         params["status"] = status
 
     rows = await db.execute(text(f"""
@@ -237,7 +237,7 @@ async def list_settlements(
     where = "WHERE 1=1"
     params: dict = {}
     if period_start:
-        where += " AND ws.period_start >= :period_start::date"
+        where += " AND ws.period_start >= CAST(:period_start AS date)"
         params["period_start"] = period_start
 
     rows = await db.execute(text(f"""
@@ -246,7 +246,7 @@ async def list_settlements(
             ws.period_start::text, ws.period_end::text,
             ws.order_count, ws.total_sales, ws.platform_fee, ws.net_payout,
             ws.payout_date::text, ws.status::text
-        FROM weekly_settlements ws
+        FROM settlements ws
         JOIN shops s ON s.id = ws.shop_id
         {where}
         ORDER BY ws.period_start DESC, s.name

@@ -52,7 +52,7 @@ async def update_me(
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    updates = {k: v for k, v in req.dict().items() if v is not None}
+    updates = {k: v for k, v in req.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(400, "수정할 항목을 입력해 주세요")
     set_clause = ", ".join(f"{k} = :{k}" for k in updates)

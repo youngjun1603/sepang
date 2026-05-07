@@ -65,6 +65,24 @@ class NearbyOrderResponse(BaseModel):
     hours_left:     float
 
 
+class OrderOut(BaseModel):
+    id:               UUID
+    customer_id:      UUID
+    shop_id:          Optional[UUID] = None
+    service_type:     str
+    wash_category:    str
+    status:           str
+    pickup_address:   str
+    delivery_address: str
+    total_amount:     int
+    platform_fee:     int
+    ordered_at:       datetime
+    deadline_at:      Optional[datetime] = None
+    picked_up_at:     Optional[datetime] = None
+    completed_at:     Optional[datetime] = None
+    customer_note:    Optional[str] = None
+
+
 # ── 가격표 ─────────────────────────────────────────────────────────────────────
 PRICE_TABLE = {
     "CLOTHES_30L": 13000,
@@ -308,6 +326,71 @@ async def get_nearby_orders(
         for r in rows
     ]
 
+
+
+@router.get("/", response_model=list[OrderOut])
+async def list_orders(
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if current_user.role == "PARTNER":
+        result = await db.execute(
+            text("""
+                SELECT o.id, o.customer_id, o.shop_id,
+                       o.service_type::text, o.wash_category::text, o.status::text,
+                       o.pickup_address, o.delivery_address,
+                       o.total_amount, o.platform_fee, o.ordered_at, o.deadline_at,
+                       o.picked_up_at, o.completed_at, o.customer_note
+                FROM orders o
+                JOIN shops s ON s.id = o.shop_id
+                WHERE s.owner_id = :uid
+                ORDER BY o.ordered_at DESC
+                LIMIT 100
+            """),
+            {"uid": current_user.id},
+        )
+    else:
+        result = await db.execute(
+            text("""
+                SELECT id, customer_id, shop_id,
+                       service_type::text, wash_category::text, status::text,
+                       pickup_address, delivery_address,
+                       total_amount, platform_fee, ordered_at, deadline_at,
+                       picked_up_at, completed_at, customer_note
+                FROM orders
+                WHERE customer_id = :uid
+                ORDER BY ordered_at DESC
+                LIMIT 100
+            """),
+            {"uid": current_user.id},
+        )
+    return [dict(r._mapping) for r in result.fetchall()]
+
+
+@router.get("/{order_id}", response_model=OrderOut)
+async def get_order(
+    order_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    result = await db.execute(
+        text("""
+            SELECT id, customer_id, shop_id, service_type::text, wash_category::text,
+                   status::text, pickup_address, delivery_address,
+                   total_amount, platform_fee, ordered_at, deadline_at,
+                   picked_up_at, completed_at, customer_note
+            FROM orders
+            WHERE id = :id
+              AND (customer_id = :uid OR shop_id IN (
+                  SELECT id FROM shops WHERE owner_id = :uid
+              ))
+        """),
+        {"id": order_id, "uid": current_user.id},
+    )
+    row = result.fetchone()
+    if not row:
+        raise HTTPException(404, "주문을 찾을 수 없습니다")
+    return dict(row._mapping)
 
 
 async def _apply_coupon(db, coupon_id, base_amount, user_id) -> int:

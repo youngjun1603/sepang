@@ -19,11 +19,11 @@ async def send_nearby_partner_notifications(
     total_amount: int,
 ):
     """주문 생성 시 반경 3km 내 점주에게 FCM 푸시"""
-    from app.core.database import sync_session_factory
+    from app.core.database import AsyncSessionLocal
     from sqlalchemy import text
 
-    with sync_session_factory() as db:
-        shops = db.execute(text("""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(text("""
             SELECT u.fcm_token
             FROM shops s
             JOIN users u ON u.id = s.owner_id
@@ -34,12 +34,13 @@ async def send_nearby_partner_notifications(
                 s.radius_km * 1000
               )
               AND u.fcm_token IS NOT NULL
-        """), {"lat": pickup_lat, "lng": pickup_lng}).fetchall()
+        """), {"lat": pickup_lat, "lng": pickup_lng})
+        shops = result.fetchall()
 
     tasks = [
         _send_fcm(
             fcm_token=shop.fcm_token,
-            title="📦 새 주문이 들어왔습니다",
+            title="새 주문이 들어왔습니다",
             body=f"{wash_category} · {total_amount:,}원",
             data={"order_id": order_id, "type": "NEW_ORDER"},
         )
