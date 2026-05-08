@@ -10,6 +10,19 @@ from typing import Optional
 import httpx
 from app.core.config import settings
 
+# Firebase Admin SDK 초기화 (앱 시작 시 1회)
+_firebase_initialized = False
+
+def _get_firebase_app():
+    global _firebase_initialized
+    if not _firebase_initialized and settings.FCM_SERVICE_ACCOUNT_JSON:
+        import firebase_admin
+        from firebase_admin import credentials
+        sa = json.loads(settings.FCM_SERVICE_ACCOUNT_JSON)
+        cred = credentials.Certificate(sa)
+        firebase_admin.initialize_app(cred)
+        _firebase_initialized = True
+
 
 async def send_nearby_partner_notifications(
     order_id: str,
@@ -50,16 +63,19 @@ async def send_nearby_partner_notifications(
 
 
 async def _send_fcm(fcm_token: str, title: str, body: str, data: dict = None):
-    async with httpx.AsyncClient(timeout=10) as client:
-        await client.post(
-            "https://fcm.googleapis.com/fcm/send",
-            headers={"Authorization": f"key={settings.FCM_SERVER_KEY}"},
-            json={
-                "to": fcm_token,
-                "notification": {"title": title, "body": body},
-                "data": data or {},
-            },
+    if not settings.FCM_SERVICE_ACCOUNT_JSON:
+        return
+    try:
+        import firebase_admin.messaging as messaging
+        _get_firebase_app()
+        message = messaging.Message(
+            notification=messaging.Notification(title=title, body=body),
+            data={k: str(v) for k, v in (data or {}).items()},
+            token=fcm_token,
         )
+        await asyncio.to_thread(messaging.send, message)
+    except Exception:
+        pass
 
 
 async def send_sms(phone: str, message: str) -> dict:

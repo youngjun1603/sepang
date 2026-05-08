@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY:          str = ""
     SUPABASE_SERVICE_ROLE_KEY:  str = ""   # 서버 전용
 
-    # FCM
-    FCM_SERVER_KEY: str = ""
+    # FCM (서비스 계정 JSON 문자열)
+    FCM_SERVICE_ACCOUNT_JSON: str = ""
 
     # Web Push VAPID
     VAPID_PRIVATE_KEY:  str = ""
