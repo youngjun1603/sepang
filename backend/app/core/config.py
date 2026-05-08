@@ -36,10 +36,24 @@ class Settings(BaseSettings):
     NAVER_SENS_SECRET_KEY: str = ""
     NAVER_SENS_SENDER:     str = ""   # 발신 번호 (010-XXXX-XXXX)
 
+    # 토스페이먼츠
+    TOSS_CLIENT_KEY: str = ""   # 클라이언트 키 (프론트엔드용)
+    TOSS_SECRET_KEY: str = ""   # 시크릿 키 (서버용)
+
+    # 관리자 IP 허용 목록 (콤마 구분, 비어있으면 모든 IP 허용)
+    ADMIN_ALLOWED_IPS: str = ""
+
     # App
     ENVIRONMENT:    str = "production"
     DEBUG:          bool = False
-    CORS_ORIGINS:   List[str] = ["https://sepang.kr", "https://partner.sepang.kr"]
+    CORS_ORIGINS:   List[str] = [
+        "https://sepang.kr",
+        "https://partner.sepang.kr",
+        "https://admin.sepang.kr",
+        "https://sepang-customer.vercel.app",
+        "https://sepang-partner.vercel.app",
+        "https://sepang-admin.vercel.app",
+    ]
 
     def model_post_init(self, __context):
         if self.ENVIRONMENT == "production" and self.JWT_SECRET == "change-me-in-production":

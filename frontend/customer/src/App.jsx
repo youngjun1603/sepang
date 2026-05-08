@@ -4,7 +4,7 @@
  * 배포: Next.js PWA / Capacitor
  */
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
-import { authApi, orderApi, reviewApi, geocodeApi, pointsApi, tokenStore, createOrderTrackingSocket } from "@sepang/shared/lib/api-client";
+import { authApi, orderApi, reviewApi, geocodeApi, pointsApi, paymentApi, tokenStore, createOrderTrackingSocket } from "@sepang/shared/lib/api-client";
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 const RouterCtx = createContext({});
@@ -335,8 +335,8 @@ function HomeScreen() {
         delivery_lat:     coords.lat,
         delivery_lng:     coords.lng,
       });
-      setToast("주문이 접수되었습니다!");
-      setTimeout(() => navigate("/tracking", { orderId: result.order_id, deadlineAt: result.deadline_at }), 800);
+      // 주문 생성 후 결제 화면으로 이동
+      navigate("/payment", { orderId: result.order_id, totalAmount: result.total_amount, deadlineAt: result.deadline_at });
     } catch (e) {
       setError(e.message || "주문 실패. 다시 시도해 주세요.");
     } finally {
@@ -852,6 +852,96 @@ function LoadingScreen() {
   );
 }
 
+// ─── 결제 화면 ────────────────────────────────────────────────────────────────
+function PaymentScreen() {
+  const { navigate, params } = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [payInfo, setPayInfo] = useState(null);
+
+  useEffect(() => {
+    if (!params?.orderId) { navigate("/home"); return; }
+    paymentApi.prepare(params.orderId)
+      .then(info => { setPayInfo(info); setLoading(false); })
+      .catch(e => { setError(e.message || "결제 준비에 실패했습니다"); setLoading(false); });
+  }, [params?.orderId]);
+
+  const handlePay = async () => {
+    if (!payInfo) return;
+    setLoading(true);
+    try {
+      // 토스페이먼츠 SDK 동적 로드
+      const { loadTossPayments } = await import("@tosspayments/payment-sdk");
+      const toss = await loadTossPayments(payInfo.client_key);
+      await toss.requestPayment("카드", {
+        amount:      payInfo.amount,
+        orderId:     payInfo.order_id,
+        orderName:   payInfo.order_name,
+        successUrl:  `${window.location.origin}/payment/success`,
+        failUrl:     `${window.location.origin}/payment/fail`,
+      });
+    } catch (e) {
+      if (e.code !== "USER_CANCEL") setError(e.message || "결제에 실패했습니다");
+      setLoading(false);
+    }
+  };
+
+  const categoryLabels = { CLOTHES_30L: "세탁물 30L", CLOTHES_50L: "세탁물 50L", BLANKET: "이불", SHOES: "신발" };
+
+  if (loading) return (
+    <><style>{CSS}</style>
+      <div className="app-root" style={{ justifyContent: "center", alignItems: "center" }}>
+        <div style={{ color: "var(--muted)", fontSize: 14 }}>결제 준비 중...</div>
+      </div>
+    </>
+  );
+
+  return (
+    <><style>{CSS}</style>
+      <div className="app-root fu">
+        <StatusBar />
+        <div className="screen">
+          <div className="app-header">
+            <div className="header-top">
+              <button className="header-icon-btn" onClick={() => navigate("/orders")}>←</button>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>결제</div>
+              <div style={{ width: 36 }} />
+            </div>
+          </div>
+          <div style={{ padding: "16px 16px 32px" }}>
+            {error && <div style={{ background: "#FFF0F0", border: "1px solid var(--red)", borderRadius: 12, padding: 14, marginBottom: 16, fontSize: 13, color: "var(--red)" }}>{error}</div>}
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>주문 정보</div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ fontSize: 13, color: "var(--muted)" }}>서비스</span>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{payInfo?.order_name}</span>
+              </div>
+              <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>결제 금액</span>
+                <span style={{ fontSize: 18, fontWeight: 800, color: "var(--blue)" }}>
+                  {(payInfo?.amount || 0).toLocaleString()}원
+                </span>
+              </div>
+            </div>
+            <div className="card" style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>결제 수단</div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>신용/체크카드, 간편결제</div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>토스페이먼츠 안전 결제</div>
+            </div>
+            <button className="btn-primary" onClick={handlePay} disabled={loading} style={{ marginBottom: 12 }}>
+              {(payInfo?.amount || 0).toLocaleString()}원 결제하기
+            </button>
+            <button onClick={() => navigate("/orders")}
+              style={{ width: "100%", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, fontSize: 14, color: "var(--muted)", cursor: "pointer" }}>
+              취소
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Route Switch ─────────────────────────────────────────────────────────────
 function RouteSwitch() {
   const { path } = useRouter();
@@ -862,6 +952,7 @@ function RouteSwitch() {
   const map = {
     "/login":    LoginScreen,
     "/home":     HomeScreen,
+    "/payment":  PaymentScreen,
     "/tracking": TrackingScreen,
     "/orders":   OrdersScreen,
     "/points":   PointsScreen,

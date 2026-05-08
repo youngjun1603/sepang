@@ -227,6 +227,32 @@ export const pointsApi = {
     apiFetch<{ coupons: Coupon[]; count: number }>("/api/v1/users/me/coupons"),
 };
 
+// ── 결제 API (토스페이먼츠) ────────────────────────────────────────────────────
+
+export const paymentApi = {
+  prepare: (orderId: string) =>
+    apiFetch<{ client_key: string; order_id: string; amount: number; order_name: string }>(
+      `/api/v1/payments/prepare/${orderId}`
+    ),
+
+  confirm: (paymentKey: string, orderId: string, amount: number) =>
+    apiFetch<{ success: boolean; payment_key: string; method: string; approved_at: string; receipt_url: string }>(
+      "/api/v1/payments/confirm",
+      { method: "POST", body: JSON.stringify({ payment_key: paymentKey, order_id: orderId, amount }) }
+    ),
+
+  cancel: (orderId: string, cancelReason: string) =>
+    apiFetch<{ success: boolean; status: string }>(
+      `/api/v1/payments/${orderId}/cancel`,
+      { method: "POST", body: JSON.stringify({ cancel_reason: cancelReason }) }
+    ),
+
+  status: (orderId: string) =>
+    apiFetch<{ order_id: string; amount: number; payment_status: string; payment_method: string; paid_at: string }>(
+      `/api/v1/payments/${orderId}`
+    ),
+};
+
 // ── Supabase Realtime 실시간 주문 추적 ───────────────────────────────────────
 
 export function createOrderTrackingSocket(

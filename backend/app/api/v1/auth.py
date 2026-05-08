@@ -250,11 +250,9 @@ async def admin_login(
     db:      AsyncSession = Depends(get_db),
 ):
     """1단계: 이메일 + 비밀번호 검증 → 임시 토큰 발급"""
-    # VPN IP 검증 (10.0.0.0/8)
     client_ip = request.client.host
-    if not _is_vpn_ip(client_ip):
-        # 감사 로그 기록 후 거부
-        raise HTTPException(403, "내부망에서만 접근 가능합니다")
+    if not _is_allowed_ip(client_ip):
+        raise HTTPException(403, "접근이 허용되지 않은 IP입니다")
 
     result = await db.execute(
         text("SELECT id, password_hash, is_active FROM users WHERE email = :email AND role = 'ADMIN'"),
@@ -333,8 +331,11 @@ async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
     return {"access_token": create_access_token(str(user.id), user.role)}
 
 
-def _is_vpn_ip(ip: str) -> bool:
-    """VPN IP 대역 검증 (10.0.0.0/8)"""
-    parts = ip.split(".")
-    return len(parts) == 4 and parts[0] == "10"
+def _is_allowed_ip(ip: str) -> bool:
+    """IP 허용 목록 검증. ADMIN_ALLOWED_IPS 환경변수가 비어있으면 모든 IP 허용."""
+    allowlist = settings.ADMIN_ALLOWED_IPS.strip()
+    if not allowlist:
+        return True
+    allowed = [a.strip() for a in allowlist.split(",") if a.strip()]
+    return any(ip.startswith(a) for a in allowed)
 
