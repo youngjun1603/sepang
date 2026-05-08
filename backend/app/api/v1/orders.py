@@ -196,6 +196,11 @@ async def update_order_status(
         raise HTTPException(404, "주문을 찾을 수 없습니다")
 
     current_status = OrderStatus(order.status)
+
+    # ACCEPTED 요청인데 이미 PENDING이 아닌 경우 → 409 (다른 점주가 먼저 수락)
+    if req.new_status == OrderStatus.ACCEPTED and current_status != OrderStatus.PENDING:
+        raise HTTPException(409, "이미 다른 점주가 수락한 주문입니다")
+
     allowed = PARTNER_TRANSITIONS.get(current_status, [])
     if req.new_status not in allowed:
         raise HTTPException(400, f"'{current_status}' 상태에서 '{req.new_status}'로 변경할 수 없습니다")

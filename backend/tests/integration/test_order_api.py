@@ -191,7 +191,7 @@ async def test_nearby_orders_geo_filter(client: AsyncClient, partner_user, make_
 
     resp = await client.get(
         "/api/v1/orders/partner/nearby",
-        headers=make_auth_header(partner_user["id"], "PARTNER"),
+        headers=make_auth_header(partner_user["id"], "PARTNER", partner_user["shop_id"]),
     )
     assert resp.status_code == 200
     order_ids = [o["order_id"] for o in resp.json()]
@@ -201,17 +201,3 @@ async def test_nearby_orders_geo_filter(client: AsyncClient, partner_user, make_
     assert "22222222-0000-0000-0000-000000000002" not in order_ids
 
 
-# conftest의 make_auth_header 픽스처
-@pytest.fixture
-def make_auth_header():
-    def _make(user_id: str, role: str):
-        import jwt
-        from datetime import datetime, timezone, timedelta
-        token = jwt.encode(
-            {"sub": user_id, "role": role,
-             "exp": datetime.now(timezone.utc) + timedelta(hours=1), "type": "access"},
-            "test-secret-key",  # 테스트 전용 시크릿
-            algorithm="HS256",
-        )
-        return {"Authorization": f"Bearer {token}"}
-    return _make

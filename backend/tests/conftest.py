@@ -73,15 +73,14 @@ async def client():
 @pytest.fixture
 def make_auth_header():
     """JWT 헤더 생성 픽스처 (테스트 전용 시크릿)"""
-    def _make(user_id: str, role: str) -> dict:
+    def _make(user_id: str, role: str, shop_id: str = None) -> dict:
         import jwt
         from datetime import datetime, timezone, timedelta
-        token = jwt.encode(
-            {"sub": user_id, "role": role,
-             "exp": datetime.now(timezone.utc) + timedelta(hours=1),
-             "type": "access"},
-            "test-secret-key",
-            algorithm="HS256",
-        )
+        payload = {"sub": user_id, "role": role,
+                   "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+                   "type": "access"}
+        if shop_id:
+            payload["shop_id"] = shop_id
+        token = jwt.encode(payload, "test-secret-key", algorithm="HS256")
         return {"Authorization": f"Bearer {token}"}
     return _make
