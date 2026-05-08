@@ -74,12 +74,42 @@ async def create_review(
             "comment":     req.comment,
         },
     )
+    review_id = row.fetchone().id
+
+    # 리뷰 포인트 적립 (+100P)
+    await db.execute(
+        text("""
+            INSERT INTO point_transactions (user_id, amount, reason)
+            VALUES (:uid, 100, '리뷰 작성')
+        """),
+        {"uid": str(current_user.id)}
+    )
+
+    # 샵 평점 및 리뷰 수 갱신
+    await db.execute(
+        text("""
+            UPDATE shops s
+            SET rating       = sub.avg_rating,
+                review_count = sub.cnt,
+                updated_at   = NOW()
+            FROM (
+                SELECT o.shop_id,
+                       ROUND(AVG(r.rating)::numeric, 2) AS avg_rating,
+                       COUNT(*) AS cnt
+                FROM reviews r
+                JOIN orders o ON o.id = r.order_id
+                WHERE o.shop_id = (
+                    SELECT shop_id FROM orders WHERE id = :order_id
+                )
+                GROUP BY o.shop_id
+            ) sub
+            WHERE s.id = sub.shop_id
+        """),
+        {"order_id": str(req.order_id)}
+    )
+
     await db.commit()
-
-    # 리뷰 작성 시 포인트 적립 (+100P) — Celery로 비동기 처리
-    # celery_app.send_task("tasks.add_review_points", args=[str(current_user.id), 100])
-
-    return {"id": str(row.fetchone().id), "message": "리뷰가 등록되었습니다"}
+    return {"id": str(review_id), "message": "리뷰가 등록되었습니다. (+100P)"}
 
 
 @router.get("/shop/{shop_id}", response_model=List[ReviewOut])

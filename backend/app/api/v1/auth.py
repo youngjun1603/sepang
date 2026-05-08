@@ -192,8 +192,17 @@ async def verify_otp(req: VerifyOTPRequest, db: AsyncSession = Depends(get_db)):
             {"name": req.name or req.phone[:4] + "****", "phone": req.phone}
         )
         user = new_user.fetchone()
-        # 신규 가입 쿠폰 발급 (Celery 작업으로 분리)
-        # celery_app.send_task("tasks.issue_signup_coupon", args=[str(user.id)])
+        # 신규 가입 쿠폰 발급 (WELCOME3000 쿠폰이 활성화된 경우에만)
+        await db.execute(
+            text("""
+                INSERT INTO user_coupons (user_id, coupon_id)
+                SELECT :uid, id FROM coupons
+                WHERE code = 'WELCOME3000' AND is_active
+                LIMIT 1
+                ON CONFLICT DO NOTHING
+            """),
+            {"uid": str(user.id)}
+        )
 
     await db.commit()
 

@@ -242,7 +242,11 @@ jobs:
 
       - name: Deploy Edge Functions
         run: |
-          supabase functions deploy send-sms --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          supabase functions deploy send-sms                  --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          supabase functions deploy sla-monitor               --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          supabase functions deploy create-weekly-settlements --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          supabase functions deploy send-d3-reminder          --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          supabase functions deploy send-friday-push          --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 

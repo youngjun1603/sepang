@@ -1,0 +1,116 @@
+# ============================================================
+# 정기 실행 배치 — Supabase Edge Functions 호출
+# ============================================================
+name: Scheduled Jobs
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"       # 5분마다 — SLA 감시
+    - cron: "0 0 * * *"         # 매일 00:00 UTC (09:00 KST) — D+3 리마인드
+    - cron: "0 11 * * 5"        # 매주 금요일 11:00 UTC (20:00 KST) — Night 프로모션
+    - cron: "0 16 * * 0"        # 매주 일요일 16:00 UTC (월요일 01:00 KST) — 정산 생성
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "실행할 작업 (sla-monitor / d3-reminder / friday-push / weekly-settlements)"
+        required: true
+        default: "sla-monitor"
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+  FUNCTIONS_BASE: "https://apghgbecayjfsuswaggf.supabase.co/functions/v1"
+
+jobs:
+  # ── SLA 감시 (5분마다) ────────────────────────────────────
+  sla-monitor:
+    name: "SLA Monitor"
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'sla-monitor' ||
+      github.event.schedule == '*/5 * * * *'
+    steps:
+      - name: Invoke sla-monitor Edge Function
+        run: |
+          RESP=$(curl -sf -X POST \
+            "${{ env.FUNCTIONS_BASE }}/sla-monitor" \
+            -H "Authorization: Bearer ${{ env.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json" \
+            --max-time 30)
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          if not d.get('ok'):
+              print('SLA monitor failed:', d)
+              exit(1)
+          print(f'SLA: warned={d.get(\"warned\",0)}, breached={d.get(\"breached\",0)}')
+          " || true
+
+  # ── D+3 리마인드 (매일 09:00 KST) ───────────────────────
+  d3-reminder:
+    name: "D+3 Reminder"
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'd3-reminder' ||
+      github.event.schedule == '0 0 * * *'
+    steps:
+      - name: Invoke send-d3-reminder Edge Function
+        run: |
+          RESP=$(curl -sf -X POST \
+            "${{ env.FUNCTIONS_BASE }}/send-d3-reminder" \
+            -H "Authorization: Bearer ${{ env.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json" \
+            --max-time 60)
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          print(f'D+3 reminder sent: {d.get(\"sent\", 0)}명')
+          " || true
+
+  # ── 금요일 Night 프로모션 (20:00 KST) ───────────────────
+  friday-push:
+    name: "Friday Night Push"
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'friday-push' ||
+      github.event.schedule == '0 11 * * 5'
+    steps:
+      - name: Invoke send-friday-push Edge Function
+        run: |
+          RESP=$(curl -sf -X POST \
+            "${{ env.FUNCTIONS_BASE }}/send-friday-push" \
+            -H "Authorization: Bearer ${{ env.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json" \
+            --max-time 120)
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          print(f'Friday push sent: {d.get(\"sent\", 0)}명')
+          " || true
+
+  # ── 주간 정산 생성 (월요일 01:00 KST) ────────────────────
+  weekly-settlements:
+    name: "Weekly Settlements"
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'weekly-settlements' ||
+      github.event.schedule == '0 16 * * 0'
+    steps:
+      - name: Invoke create-weekly-settlements Edge Function
+        run: |
+          RESP=$(curl -sf -X POST \
+            "${{ env.FUNCTIONS_BASE }}/create-weekly-settlements" \
+            -H "Authorization: Bearer ${{ env.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json" \
+            --max-time 120)
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          if d.get('errors'):
+              print('Errors:', d['errors'])
+          print(f'Settlements created: {d.get(\"created\", 0)}개 / Period: {d.get(\"period\", \"?\")}')
+          " || true
