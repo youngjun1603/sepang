@@ -405,12 +405,27 @@ function ShopsPage() {
 }
 
 function SettlementsPage() {
-  const { data: settlements, loading, error } = useApi(() => adminApi.settlements(), []);
+  const { data: settlements, loading, error, reload } = useApi(() => adminApi.settlements(), []);
+  const [paying, setPaying] = useState({});
 
   const totals = settlements ? {
     payout: settlements.reduce((s,r) => s + r.net_payout, 0),
     fee: settlements.reduce((s,r) => s + r.platform_fee, 0),
-  } : {payout:0, fee:0};
+    pending: settlements.filter(s => s.status === "PENDING").length,
+  } : {payout:0, fee:0, pending:0};
+
+  async function handlePay(id) {
+    if (!window.confirm("이 정산을 지급 완료로 처리하시겠습니까?")) return;
+    setPaying(p => ({...p, [id]: true}));
+    try {
+      await adminApi.markSettlementPaid(id);
+      reload();
+    } catch(e) {
+      alert(e.message || "처리에 실패했습니다");
+    } finally {
+      setPaying(p => ({...p, [id]: false}));
+    }
+  }
 
   return (
     <Layout title="정산 관리"><style>{CSS}</style>
@@ -419,7 +434,7 @@ function SettlementsPage() {
           {l:"총 정산액",    v:`${totals.payout.toLocaleString()}원`, c:"blue"},
           {l:"플랫폼 수수료",v:`${totals.fee.toLocaleString()}원`,    c:"green"},
           {l:"정산 건수",    v:`${settlements?.length??0}건`,          c:"yellow"},
-          {l:"처리 상태",    v:"대기중",                               c:"red"},
+          {l:"미지급 건수",  v:`${totals.pending}건`,                  c:"red"},
         ].map((k,i)=>(
           <div key={i} className={`kpi ${k.c}`}><div className="kpi-lbl">{k.l}</div><div className="kpi-val" style={{fontSize:18}}>{k.v}</div></div>
         ))}
@@ -427,18 +442,28 @@ function SettlementsPage() {
       <div className="card">
         <div className="card-title">점포별 정산</div>
         {loading ? <Spinner/> : error ? <ErrorBox msg={error}/> :
-          <table className="tbl"><thead><tr><th>점포명</th><th>기간</th><th>건수</th><th>총 매출</th><th>수수료</th><th>정산액</th><th>상태</th></tr></thead>
-          <tbody>{(settlements??[]).map((s,i)=>(
-            <tr key={i}>
-              <td style={{fontWeight:600}}>{s.shop_name}</td>
-              <td style={{fontSize:11,color:"#888"}}>{s.period_start}~{s.period_end}</td>
-              <td style={{fontFamily:"'Syne',sans-serif",fontWeight:700}}>{s.order_count}건</td>
-              <td>{s.total_sales?.toLocaleString()}원</td>
-              <td style={{color:"#FF3D00"}}>-{s.platform_fee?.toLocaleString()}원</td>
-              <td style={{fontFamily:"'Syne',sans-serif",fontWeight:700,color:"#0057FF"}}>{s.net_payout?.toLocaleString()}원</td>
-              <td><span className={`badge ${s.status==="PAID"?"ab-green":"ab-yellow"}`}>{s.status==="PAID"?"지급완료":"대기중"}</span></td>
-            </tr>
-          ))}</tbody></table>
+          <table className="tbl">
+            <thead><tr><th>점포명</th><th>기간</th><th>건수</th><th>총 매출</th><th>수수료</th><th>정산액</th><th>상태</th><th>처리</th></tr></thead>
+            <tbody>{(settlements??[]).map((s,i)=>(
+              <tr key={i}>
+                <td style={{fontWeight:600}}>{s.shop_name}</td>
+                <td style={{fontSize:11,color:"#888"}}>{s.period_start}~{s.period_end}</td>
+                <td style={{fontFamily:"'Syne',sans-serif",fontWeight:700}}>{s.order_count}건</td>
+                <td>{s.total_sales?.toLocaleString()}원</td>
+                <td style={{color:"#FF3D00"}}>-{s.platform_fee?.toLocaleString()}원</td>
+                <td style={{fontFamily:"'Syne',sans-serif",fontWeight:700,color:"#0057FF"}}>{s.net_payout?.toLocaleString()}원</td>
+                <td><span className={`badge ${s.status==="PAID"?"ab-green":"ab-yellow"}`}>{s.status==="PAID"?"지급완료":"대기중"}</span></td>
+                <td>
+                  {s.status === "PENDING"
+                    ? <button className="btn btn-primary" onClick={() => handlePay(s.id)} disabled={paying[s.id]}>
+                        {paying[s.id] ? <span className="spinner"/> : "지급 처리"}
+                      </button>
+                    : <span style={{fontSize:11,color:"#888"}}>완료</span>
+                  }
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
         }
       </div>
     </Layout>
@@ -490,11 +515,127 @@ function MarketingPage() {
 }
 
 function AnalyticsPage() {
+  const { data: kpi, loading: kpiLoading } = useApi(() => adminApi.dashboard());
+  const { data: shops, loading: shopsLoading } = useApi(() => adminApi.shops());
+  const { data: slaRisk, loading: slaLoading } = useApi(() => adminApi.slaAtRisk());
+  const { data: settlements } = useApi(() => adminApi.settlements());
+
+  const topShops = (shops || []).slice().sort((a, b) => b.today_orders - a.today_orders).slice(0, 5);
+  const settleList = (settlements || []).slice(0, 6);
+  const maxSales = settleList.length ? Math.max(...settleList.map(s => s.total_sales || 0), 1) : 1;
+
+  const slaRows = (slaRisk || []).slice(0, 10);
+
   return (
     <Layout title="분석 대시보드"><style>{CSS}</style>
+      {/* KPI 카드 */}
+      <div className="kpi-grid">
+        {[
+          { lbl:"오늘 주문", val: kpiLoading ? "…" : (kpi?.today_orders ?? 0), unit:"건", color:"blue", icon:"📦" },
+          { lbl:"완료율", val: kpiLoading ? "…" : `${kpi?.conversion_rate ?? 0}`, unit:"%", color:"green", icon:"✅" },
+          { lbl:"주간 매출", val: kpiLoading ? "…" : ((kpi?.week_revenue ?? 0) / 10000).toFixed(0), unit:"만원", color:"yellow", icon:"💰" },
+          { lbl:"SLA 위반", val: kpiLoading ? "…" : (kpi?.sla_violations ?? 0), unit:"건", color:"red", icon:"⚠️" },
+          { lbl:"평균 주문액", val: kpiLoading ? "…" : (kpi?.avg_order_value ?? 0).toLocaleString(), unit:"원", color:"blue", icon:"💳" },
+          { lbl:"활성 점포", val: kpiLoading ? "…" : (kpi?.active_shops ?? 0), unit:"개", color:"green", icon:"🏪" },
+        ].map(({ lbl, val, unit, color, icon }) => (
+          <div key={lbl} className={`kpi ${color}`}>
+            <div className="kpi-icon">{icon}</div>
+            <div className="kpi-lbl">{lbl}</div>
+            <div className="kpi-val">{val}<span style={{fontSize:12,fontWeight:400,marginLeft:3}}>{unit}</span></div>
+          </div>
+        ))}
+      </div>
+
+      <div className="g21">
+        {/* 주간 정산 트렌드 */}
+        <div className="card">
+          <div className="card-title">
+            주간 정산 트렌드
+            <span style={{fontSize:10,color:"#888",fontWeight:400}}>최근 6건</span>
+          </div>
+          {settleList.length === 0 ? (
+            <div style={{color:"#888",fontSize:12,padding:"20px 0",textAlign:"center"}}>정산 데이터가 없습니다</div>
+          ) : (
+            <div style={{overflowX:"auto"}}>
+              <table className="tbl">
+                <thead><tr>
+                  <th>기간</th><th>점포</th><th>매출</th><th>수수료</th><th>정산액</th><th>상태</th>
+                </tr></thead>
+                <tbody>
+                  {settleList.map((s, i) => (
+                    <tr key={i}>
+                      <td style={{fontSize:10,color:"#888"}}>{s.period_start} ~ {s.period_end}</td>
+                      <td style={{fontWeight:600}}>{s.shop_name || "-"}</td>
+                      <td>{(s.total_sales || 0).toLocaleString()}원</td>
+                      <td style={{color:"var(--red)"}}>{(s.platform_fee || 0).toLocaleString()}원</td>
+                      <td style={{fontWeight:700,color:"var(--blue)"}}>{(s.net_payout || 0).toLocaleString()}원</td>
+                      <td><span className={`badge ${s.status === "PAID" ? "ab-green" : s.status === "PENDING" ? "ab-yellow" : "ab-gray"}`}>{s.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* 오늘 주문 TOP 점포 */}
+        <div className="card">
+          <div className="card-title">점포별 오늘 주문 TOP 5</div>
+          {shopsLoading ? <div style={{color:"#888",fontSize:12,textAlign:"center",padding:"20px 0"}}>로딩 중...</div> : (
+            topShops.length === 0
+              ? <div style={{color:"#888",fontSize:12,padding:"20px 0",textAlign:"center"}}>데이터 없음</div>
+              : topShops.map((shop, i) => (
+                <div key={shop.id} className="fn-row">
+                  <div className="fn-lbl" style={{width:28,fontWeight:700,color:i===0?"var(--blue)":"#888"}}>#{i+1}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:11,fontWeight:600,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{shop.name}</div>
+                    <div className="fn-bg">
+                      <div className="fn-fill" style={{
+                        width: `${Math.round((shop.today_orders / Math.max(...topShops.map(s => s.today_orders), 1)) * 100)}%`,
+                        background: i===0 ? "var(--blue)" : i===1 ? "var(--green)" : "#AAB8FF",
+                      }}>{shop.today_orders}건</div>
+                    </div>
+                  </div>
+                  <div style={{fontSize:10,color:"#888"}}>{shop.rating?.toFixed(1)}★</div>
+                </div>
+              ))
+          )}
+        </div>
+      </div>
+
+      {/* SLA 위험 주문 */}
       <div className="card">
-        <div className="card-title">코호트 리텐션</div>
-        <div style={{color:"#888",fontSize:12,padding:"20px 0",textAlign:"center"}}>분석 대시보드는 데이터 파이프라인 연동 후 활성화됩니다.</div>
+        <div className="card-title">
+          SLA 위험 주문
+          {slaRows.length > 0 && <span className="badge ab-red">{slaRows.length}건 위험</span>}
+        </div>
+        {slaLoading ? <div style={{color:"#888",fontSize:12,textAlign:"center",padding:"20px 0"}}>로딩 중...</div>
+          : slaRows.length === 0
+            ? <div style={{color:"var(--green)",fontSize:12,padding:"12px 0",textAlign:"center"}}>✅ SLA 위험 주문 없음</div>
+            : (
+              <table className="tbl">
+                <thead><tr>
+                  <th>주문번호</th><th>고객</th><th>점포</th><th>상태</th><th>마감까지</th>
+                </tr></thead>
+                <tbody>
+                  {slaRows.map((o, i) => {
+                    const h = typeof o.hours_left === "number" ? o.hours_left : null;
+                    const urgent = h !== null && h < 1;
+                    return (
+                      <tr key={i}>
+                        <td style={{fontFamily:"monospace",fontSize:11}}>{String(o.id || "").slice(-6).toUpperCase()}</td>
+                        <td>{o.customer_name || "-"}</td>
+                        <td>{o.shop_name || "-"}</td>
+                        <td><span className="badge ab-yellow">{o.status}</span></td>
+                        <td style={{fontWeight:700,color: urgent ? "var(--red)" : "var(--yellow)"}}>
+                          {h !== null ? `${h.toFixed(1)}h` : "-"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
       </div>
     </Layout>
   );

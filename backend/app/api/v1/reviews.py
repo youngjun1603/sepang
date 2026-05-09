@@ -74,7 +74,10 @@ async def create_review(
             "comment":     req.comment,
         },
     )
-    review_id = row.fetchone().id
+    review_row = row.fetchone()
+    if not review_row:
+        raise HTTPException(500, "리뷰 저장에 실패했습니다")
+    review_id = review_row.id
 
     # 리뷰 포인트 적립 (+100P)
     await db.execute(

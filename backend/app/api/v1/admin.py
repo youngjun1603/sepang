@@ -13,6 +13,7 @@ GET  /api/v1/admin/audit-logs    접근 감사 로그
 from __future__ import annotations
 from typing import Optional
 from datetime import date
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -263,6 +264,29 @@ async def list_settlements(
         )
         for r in rows.fetchall()
     ]
+
+
+@router.patch("/settlements/{settlement_id}/pay")
+async def mark_settlement_paid(
+    settlement_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    result = await db.execute(
+        text("""
+            UPDATE settlements
+            SET status = 'PAID', payout_date = CURRENT_DATE
+            WHERE id = :id AND status = 'PENDING'
+            RETURNING id
+        """),
+        {"id": settlement_id},
+    )
+    if not result.fetchone():
+        raise HTTPException(404, "정산 내역을 찾을 수 없거나 이미 지급 완료 상태입니다")
+    await db.commit()
+    await _audit(db, request, current_user, f"정산 지급 처리: {settlement_id}")
+    return {"success": True}
 
 
 @router.get("/audit-logs", response_model=list[AuditLog])

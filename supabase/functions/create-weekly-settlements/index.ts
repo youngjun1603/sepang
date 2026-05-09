@@ -59,7 +59,7 @@ Deno.serve(async () => {
       .select("id")
       .eq("shop_id", shop.id)
       .eq("period_start", periodStart.toISOString().split("T")[0])
-      .single();
+      .maybeSingle();
 
     if (existing) continue;
 
@@ -68,9 +68,9 @@ Deno.serve(async () => {
       period_start: periodStart.toISOString().split("T")[0],
       period_end:   periodEnd.toISOString().split("T")[0],
       order_count:  orders.length,
-      gross_amount: grossAmount,
+      total_sales:  grossAmount,
       platform_fee: totalFee,
-      net_amount:   netAmount,
+      net_payout:   netAmount,
       status:       "PENDING",
     });
 

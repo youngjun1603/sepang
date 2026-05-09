@@ -18,11 +18,11 @@ def upgrade():
     op.execute("CREATE TYPE payment_status AS ENUM ('PENDING', 'PAID', 'FAILED', 'CANCELLED', 'REFUNDED')")
     op.execute("CREATE TYPE payment_method AS ENUM ('CARD', 'VIRTUAL_ACCOUNT', 'TRANSFER', 'MOBILE', 'GIFT_CERTIFICATE', 'EASY_PAY')")
 
-    # orders 테이블에 결제 컬럼 추가
-    op.add_column("orders", sa.Column("payment_status", sa.Text(), nullable=False, server_default="PENDING"))
-    op.add_column("orders", sa.Column("payment_key",    sa.Text(), nullable=True))
-    op.add_column("orders", sa.Column("payment_method", sa.Text(), nullable=True))
-    op.add_column("orders", sa.Column("paid_at",        sa.DateTime(timezone=True), nullable=True))
+    # orders 테이블에 결제 컬럼 추가 (생성한 ENUM 타입 직접 참조)
+    op.execute("ALTER TABLE orders ADD COLUMN payment_status payment_status NOT NULL DEFAULT 'PENDING'")
+    op.execute("ALTER TABLE orders ADD COLUMN payment_key TEXT")
+    op.execute("ALTER TABLE orders ADD COLUMN payment_method payment_method")
+    op.execute("ALTER TABLE orders ADD COLUMN paid_at TIMESTAMPTZ")
 
     # payment_transactions 테이블
     op.create_table(

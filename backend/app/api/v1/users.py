@@ -31,11 +31,20 @@ class PushSubscription(BaseModel):
     p256dh_key: str
     auth_key:   str
 
+class FcmTokenRequest(BaseModel):
+    fcm_token: str
+
 
 @router.get("/me")
 async def get_me(current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        text("SELECT id, name, phone, email, role, created_at FROM users WHERE id = :id"),
+        text("""
+            SELECT u.id, u.name, u.phone, u.email, u.role, u.created_at,
+                   s.name AS shop_name, s.rating
+            FROM users u
+            LEFT JOIN shops s ON s.owner_id = u.id
+            WHERE u.id = :id
+        """),
         {"id": current_user.id},
     )
     user = result.fetchone()
@@ -115,6 +124,20 @@ async def get_coupons(current_user=Depends(get_current_user), db: AsyncSession =
         for r in rows.fetchall()
     ]
     return {"coupons": coupons, "count": len(coupons)}
+
+
+@router.patch("/me/fcm-token", status_code=200)
+async def save_fcm_token(
+    req: FcmTokenRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(
+        text("UPDATE users SET fcm_token = :token WHERE id = :id"),
+        {"token": req.fcm_token, "id": current_user.id},
+    )
+    await db.commit()
+    return {"success": True}
 
 
 @router.post("/me/push-subscription", status_code=201)

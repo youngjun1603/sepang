@@ -199,7 +199,7 @@ async def verify_otp(req: VerifyOTPRequest, db: AsyncSession = Depends(get_db)):
                 SELECT :uid, id FROM coupons
                 WHERE code = 'WELCOME3000' AND is_active
                 LIMIT 1
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (user_id, coupon_id) DO NOTHING
             """),
             {"uid": str(user.id)}
         )

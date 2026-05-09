@@ -942,6 +942,68 @@ function PaymentScreen() {
   );
 }
 
+// ─── 결제 성공 화면 ────────────────────────────────────────────────────────────
+function PaymentSuccessScreen() {
+  const { navigate } = useRouter();
+  const params = new URLSearchParams(window.location.search);
+  const paymentKey = params.get("paymentKey");
+  const orderId    = params.get("orderId");
+  const amount     = params.get("amount");
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!paymentKey || !orderId || !amount) { setError("잘못된 결제 정보입니다"); return; }
+    paymentApi.confirm(paymentKey, orderId, Number(amount))
+      .then(() => setDone(true))
+      .catch(e => setError(e.message || "결제 확인에 실패했습니다"));
+  }, []);
+
+  return (
+    <><style>{CSS}</style>
+      <div className="app-root" style={{ justifyContent: "center", alignItems: "center", textAlign: "center", padding: 24 }}>
+        {!done && !error && <div style={{ color: "var(--muted)", fontSize: 14 }}>결제 확인 중...</div>}
+        {done && (
+          <>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>결제 완료!</div>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 32 }}>
+              {Number(amount).toLocaleString()}원이 결제되었습니다.
+            </div>
+            <button className="btn-primary" onClick={() => navigate("/orders")}>주문 내역 확인</button>
+          </>
+        )}
+        {error && (
+          <>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>❌</div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, color: "var(--red)" }}>결제 오류</div>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 32 }}>{error}</div>
+            <button className="btn-primary" onClick={() => navigate("/orders")}>주문 내역으로</button>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─── 결제 실패 화면 ────────────────────────────────────────────────────────────
+function PaymentFailScreen() {
+  const { navigate } = useRouter();
+  const params = new URLSearchParams(window.location.search);
+  const message = params.get("message") || "결제가 취소되었거나 실패했습니다.";
+
+  return (
+    <><style>{CSS}</style>
+      <div className="app-root" style={{ justifyContent: "center", alignItems: "center", textAlign: "center", padding: 24 }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>❌</div>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, color: "var(--red)" }}>결제 실패</div>
+        <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 32 }}>{decodeURIComponent(message)}</div>
+        <button className="btn-primary" onClick={() => navigate("/orders")}>주문 내역으로</button>
+      </div>
+    </>
+  );
+}
+
 // ─── Route Switch ─────────────────────────────────────────────────────────────
 function RouteSwitch() {
   const { path } = useRouter();
@@ -950,14 +1012,16 @@ function RouteSwitch() {
   if (isLoading) return <LoadingScreen />;
 
   const map = {
-    "/login":    LoginScreen,
-    "/home":     HomeScreen,
-    "/payment":  PaymentScreen,
-    "/tracking": TrackingScreen,
-    "/orders":   OrdersScreen,
-    "/points":   PointsScreen,
-    "/mypage":   MyPageScreen,
-    "/review":   ReviewScreen,
+    "/login":           LoginScreen,
+    "/home":            HomeScreen,
+    "/payment":         PaymentScreen,
+    "/payment/success": PaymentSuccessScreen,
+    "/payment/fail":    PaymentFailScreen,
+    "/tracking":        TrackingScreen,
+    "/orders":          OrdersScreen,
+    "/points":          PointsScreen,
+    "/mypage":          MyPageScreen,
+    "/review":          ReviewScreen,
   };
   const C = map[path] || LoginScreen;
   return <C />;

@@ -88,7 +88,8 @@ Deno.serve(async () => {
     for (const order of (rows ?? [])) {
       const deadline = new Date(order.deadline_at).getTime();
       const hoursLeft = (deadline - now) / 3600000;
-      const fcmToken = order.shops?.users?.fcm_token;
+      const usersData = order.shops?.users;
+      const fcmToken = Array.isArray(usersData) ? usersData[0]?.fcm_token : usersData?.fcm_token;
 
       if (hoursLeft < 0) {
         // SLA 위반 — 환불 포인트 적립

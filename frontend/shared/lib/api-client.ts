@@ -120,6 +120,16 @@ export const authApi = {
   me: () => apiFetch<User>("/api/v1/users/me"),
 
   logout: () => tokenStore.clear(),
+
+  saveFcmToken: (fcm_token: string) =>
+    apiFetch<{ success: boolean }>("/api/v1/users/me/fcm-token", {
+      method: "PATCH", body: JSON.stringify({ fcm_token }),
+    }),
+
+  savePushSubscription: (endpoint: string, p256dh_key: string, auth_key: string) =>
+    apiFetch<{ success: boolean }>("/api/v1/users/me/push-subscription", {
+      method: "POST", body: JSON.stringify({ endpoint, p256dh_key, auth_key }),
+    }),
 };
 
 // ── 주문 API ─────────────────────────────────────────────────────────────────
@@ -188,6 +198,9 @@ export const adminApi = {
 
   auditLogs: () =>
     apiFetch<AuditLog[]>("/api/v1/admin/audit-logs"),
+
+  markSettlementPaid: (id: string) =>
+    apiFetch<{ success: boolean }>(`/api/v1/admin/settlements/${id}/pay`, { method: "PATCH" }),
 };
 
 // ── 리뷰 API ─────────────────────────────────────────────────────────────────

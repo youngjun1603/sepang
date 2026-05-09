@@ -8,6 +8,27 @@
 import { useState, useEffect, createContext, useContext, useRef } from "react";
 import { authApi, orderApi, settlementApi, tokenStore } from "@sepang/shared/lib/api-client";
 
+// ─── Web Push 구독 (로그인 후 호출) ───────────────────────────────────────────
+async function subscribePush() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!vapidKey) return;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidKey });
+    const { endpoint, keys } = sub.toJSON();
+    const token = tokenStore.get();
+    if (!token) return;
+    await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/users/me/push-subscription`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ endpoint, p256dh_key: keys.p256dh, auth_key: keys.auth }),
+    });
+  } catch {
+    // 권한 거부 또는 미지원 환경에서 무시
+  }
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 const RouterCtx = createContext({});
 const useRouter = () => useContext(RouterCtx);
@@ -173,6 +194,7 @@ function LoginScreen() {
       tokenStore.set(data.access_token, data.refresh_token);
       const me = await authApi.me();
       login({ name: me.name, shopName: me.shop_name ?? "내 점포", shopId: data.shop_id, rating: me.rating ?? 4.9 });
+      subscribePush();
       navigate("/orders");
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
