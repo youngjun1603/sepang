@@ -26,8 +26,8 @@ jobs:
   sla-monitor:
     name: "SLA Monitor"
     runs-on: ubuntu-latest
-    if: >
-      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'sla-monitor' ||
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'sla-monitor') ||
       github.event.schedule == '*/5 * * * *'
     steps:
       - name: Invoke sla-monitor Edge Function
@@ -51,8 +51,8 @@ jobs:
   d3-reminder:
     name: "D+3 Reminder"
     runs-on: ubuntu-latest
-    if: >
-      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'd3-reminder' ||
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'd3-reminder') ||
       github.event.schedule == '0 0 * * *'
     steps:
       - name: Invoke send-d3-reminder Edge Function
@@ -73,8 +73,8 @@ jobs:
   friday-push:
     name: "Friday Night Push"
     runs-on: ubuntu-latest
-    if: >
-      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'friday-push' ||
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'friday-push') ||
       github.event.schedule == '0 11 * * 5'
     steps:
       - name: Invoke send-friday-push Edge Function
@@ -95,8 +95,8 @@ jobs:
   weekly-settlements:
     name: "Weekly Settlements"
     runs-on: ubuntu-latest
-    if: >
-      github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'weekly-settlements' ||
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'weekly-settlements') ||
       github.event.schedule == '0 16 * * 0'
     steps:
       - name: Invoke create-weekly-settlements Edge Function
