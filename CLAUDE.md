@@ -24,7 +24,7 @@ sepang-admin    prj_q40A5Llde4FWxYnal6JHNVWO5Hj0
 Org ID          team_JBhMZkd4FWWdIinWku39uvFQ
 ```
 
-## 서비스 URL (배포 후)
+## 서비스 URL
 
 | 앱 | 기본 URL | 커스텀 도메인 |
 |----|----------|---------------|
@@ -36,11 +36,13 @@ Org ID          team_JBhMZkd4FWWdIinWku39uvFQ
 ## 주요 기술 결정
 
 - **FastAPI → Vercel Python Serverless**: `backend/vercel.json` (`@vercel/python`)
+- **DB 연결**: Session Pooler (`aws-1-ap-northeast-1.pooler.supabase.com:5432`) + `NullPool` — 아래 트러블슈팅 참고
 - **WebSocket 제거**: Supabase Realtime (`postgres_changes`)으로 실시간 추적
 - **S3 제거**: Supabase Storage (`asyncio.to_thread`)으로 사진 업로드
 - **Redis/Celery 제거**: Vercel Serverless 환경에서 불필요
 - **next-pwa 교체**: `next-pwa@5.x` → `@ducanh2912/next-pwa@10.x` (webpack 호환)
-- **DB 마이그레이션**: Alembic + asyncpg (`postgresql+asyncpg://`). alembic_version 테이블에 0003 스탬프됨 (초기 스키마는 Management API로 직접 적용)
+- **DB 마이그레이션**: Alembic + asyncpg. 초기 스키마는 Supabase Management API로 직접 적용
+- **MONITOR_API_TOKEN**: GitHub Actions 모니터링용 정적 장기 토큰 (JWT 대신 사용)
 
 ## 폴더 구조
 
@@ -48,7 +50,7 @@ Org ID          team_JBhMZkd4FWWdIinWku39uvFQ
 sepang/
 ├── backend/          FastAPI + Alembic (Vercel Python Serverless)
 │   ├── app/
-│   │   ├── api/v1/   orders, auth, admin, users, settlements, reviews, geocoding
+│   │   ├── api/v1/   orders, auth, admin, users, settlements, reviews, geocoding, payments
 │   │   ├── core/     config, database, auth
 │   │   ├── models/   order, shop, base
 │   │   └── services/ notification (FCM/WebPush/SMS), geo, geocoding
@@ -60,68 +62,80 @@ sepang/
 │   └── admin/        Next.js 14 (관리자)
 ├── supabase/
 │   ├── config.toml
-│   └── functions/send-sms/index.ts
+│   └── functions/    send-sms, sla-monitor, create-weekly-settlements, send-d3-reminder, send-friday-push
 └── .github/workflows/
-    ├── 01_ci.yml         E2E + 보안 스캔
-    └── 02_cd_vercel.yml  Vercel 4개 프로젝트 + Edge Functions 배포
+    ├── 01_ci.yml              CI (lint, type check, test)
+    ├── 02_cd_vercel.yml       CD (Vercel 4개 프로젝트 + Edge Functions)
+    ├── 04_monitoring.yml      헬스체크 + SLA 감시 (10분마다)
+    └── 05_scheduled_jobs.yml  정기 배치 작업
 ```
 
 ## 환경변수
 
 ### 백엔드 (Vercel)
 ```
-SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
-DATABASE_URL    postgresql+asyncpg://postgres.apghgbecayjfsuswaggf:...@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres
-JWT_SECRET      (Vercel 환경변수에 설정됨)
-ENVIRONMENT     production
+DATABASE_URL              postgresql+asyncpg://postgres.apghgbecayjfsuswaggf:Sepang2026!@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres
+JWT_SECRET                (Vercel 환경변수에 설정됨)
+ENVIRONMENT               production
+SUPABASE_URL              https://apghgbecayjfsuswaggf.supabase.co
+SUPABASE_ANON_KEY         (Vercel 환경변수에 설정됨)
+SUPABASE_SERVICE_ROLE_KEY (Vercel 환경변수에 설정됨)
+MONITOR_API_TOKEN         (Vercel + GitHub Secret 동일값 설정됨)
+TOSS_CLIENT_KEY           (클라이언트 발급 후 등록 필요)
+TOSS_SECRET_KEY           (클라이언트 발급 후 등록 필요)
+NAVER_SENS_*              (클라이언트 발급 후 등록 필요)
+FCM_SERVICE_ACCOUNT_JSON  (등록 완료)
+VAPID_PRIVATE_KEY         (등록 완료)
+VAPID_PUBLIC_KEY          (등록 완료)
+KAKAO_MAP_REST_API_KEY    (등록 완료)
 ```
 
 ### 프론트엔드 (Vercel)
 ```
-NEXT_PUBLIC_SUPABASE_URL     https://apghgbecayjfsuswaggf.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY  sb_publishable_...
+NEXT_PUBLIC_SUPABASE_URL      https://apghgbecayjfsuswaggf.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY (설정됨)
 NEXT_PUBLIC_API_URL           https://sepang-api.vercel.app
 ```
 
 ### GitHub Secrets
 ```
-# Vercel 배포
-VERCEL_TOKEN                  vercel.com/account/tokens 에서 발급한 PAT
+VERCEL_TOKEN                  PAT (설정됨)
 VERCEL_ORG_ID                 team_JBhMZkd4FWWdIinWku39uvFQ
 VERCEL_PROJECT_ID_BACKEND     prj_2pECSbwJ4BMy4iM7R9mp2XI1XSSc
 VERCEL_PROJECT_ID_CUSTOMER    prj_q9hn6s3gExBIBH5xckqSgvKHVBWv
 VERCEL_PROJECT_ID_PARTNER     prj_Ynt1tle9JFSmwm3A1T3dLJwOAY6v
 VERCEL_PROJECT_ID_ADMIN       prj_q40A5Llde4FWxYnal6JHNVWO5Hj0
-
-# Supabase — DB 마이그레이션 (Direct URL, port 5432, not pooler 6543)
-SUPABASE_DIRECT_URL           postgresql+asyncpg://postgres.[REF]:[PW]@db.apghgbecayjfsuswaggf.supabase.co:5432/postgres
+SUPABASE_DIRECT_URL           postgresql+asyncpg://postgres:Sepang2026!@db.apghgbecayjfsuswaggf.supabase.co:5432/postgres
 SUPABASE_PROJECT_REF          apghgbecayjfsuswaggf
-SUPABASE_ACCESS_TOKEN         Supabase 대시보드 Account > Access Tokens
-
-# Supabase — 프론트엔드 빌드 주입
+SUPABASE_ACCESS_TOKEN         (설정됨)
 SUPABASE_URL                  https://apghgbecayjfsuswaggf.supabase.co
-SUPABASE_ANON_KEY             sb_publishable_...
-
-# 선택
+SUPABASE_ANON_KEY             (설정됨)
+MONITOR_API_TOKEN             (설정됨)
 SLACK_WEBHOOK_URL             배포 알림 (없어도 continue-on-error)
 ```
 
 ## 주요 API 엔드포인트
 
 ```
+GET  /health                         헬스체크
+GET  /api/v1/health/db               DB 연결 확인
+GET  /api/v1/health/storage          Storage 연결 확인
+
 POST /api/v1/auth/send-otp           OTP 발송
 POST /api/v1/auth/verify-otp         OTP 인증 + JWT 발급
 POST /api/v1/auth/partner/login      점주 로그인 (사업자번호)
 POST /api/v1/auth/admin/login        관리자 1단계 로그인
 POST /api/v1/auth/admin/otp          관리자 2FA OTP 검증
-POST /api/v1/auth/refresh            JWT 갱신 (?refresh_token=...)
+POST /api/v1/auth/refresh            JWT 갱신
+
 POST /api/v1/orders/                 주문 생성 (CUSTOMER)
 PATCH /api/v1/orders/{id}/status     상태 변경 (PARTNER)
 POST /api/v1/orders/{id}/photos      사진 업로드 → Supabase Storage
 GET  /api/v1/orders/partner/nearby   반경 내 대기 주문 (PostGIS)
+
 GET  /api/v1/users/me                내 프로필
 POST /api/v1/geocode/                주소 → 위경도 (카카오 Maps)
-GET  /health                         헬스체크
+GET  /api/v1/admin/sla-at-risk       SLA 위험 주문 (MONITOR_API_TOKEN 또는 ADMIN JWT)
 ```
 
 ## DB 스키마 핵심
@@ -142,33 +156,56 @@ set_order_deadline()                       트리거: 주문 마감 12시간 자
 orders: 고객은 본인 주문만, 점주는 담당 주문만 SELECT
 users: 본인 프로필만 SELECT/UPDATE
 service_role: 모든 테이블 전체 접근 (백엔드 API 사용)
+
+-- 등록된 기본 데이터
+coupons: WELCOME3000 (신규가입 3,000원), REVIEW100 (리뷰작성 적립)
 ```
 
-## 수정 완료 (코드베이스 검증 후 픽스)
+## DB 연결 핵심 주의사항
 
-- `backend/app/api/v1/auth.py` — `validator` 미사용 import 제거 (Pydantic v2 deprecated)
-- `backend/app/api/v1/auth.py` — `create_access_token`에 optional `shop_id` 추가; `partner_login`에서 JWT에 포함
-- `backend/app/core/auth.py` — `get_current_user`에서 JWT payload의 `shop_id` 추출 → PARTNER 엔드포인트 `current_user.shop_id` 버그 수정
-- `.github/workflows/01_ci.yml` — `ruff`, `mypy`, `pytest unit/integration`, `alembic` 모두 `working-directory: backend` 추가
-- `.github/workflows/01_ci.yml` — `redis` 서비스 제거, `REDIS_URL`/`S3_BUCKET`/`AWS_DEFAULT_REGION` 환경변수 제거
-- `.github/workflows/01_ci.yml` — `frontend-typecheck` 잡: matrix 전략으로 customer/partner/admin 각각 독립 실행
-- `next.config.js` (customer/partner) — `next-pwa@5.x` → `@ducanh2912/next-pwa@10.x`
-- `package.json` (customer/partner/admin) — eslint `^9.x` → `^8.57.0` (eslint-config-next@14 호환)
-- Supabase `config.toml` — 잘못된 auth 키 제거 (`refresh_token_rotation_enabled` 등)
-- DB 스키마 — Supabase Management API로 직접 적용 (PostGIS, RLS, Realtime 포함)
+Vercel(IPv4 전용) + Supabase 연결 시 반드시 아래 규칙 준수:
+
+| 항목 | 올바른 설정 | 잘못된 설정 |
+|------|------------|------------|
+| 스키마 | `postgresql+asyncpg://` | `postgresql://` → psycopg2 오류 |
+| 호스트 | `aws-1-ap-northeast-1.pooler.supabase.com` | `aws-0-...` → ENOTFOUND |
+| 포트 | `5432` (Session Pooler) | `6543` (Transaction Pooler) → DuplicatePreparedStatementError |
+| Direct URL | 사용 불가 (IPv6 전용) | `db.*.supabase.co` → Vercel에서 연결 불가 |
+| Pool 설정 | `NullPool` (serverless 최적화) | QueuePool → prepared statement 충돌 |
+
+`SUPABASE_DIRECT_URL` (GitHub Secret, 마이그레이션 전용): `db.*.supabase.co:5432` 사용 (Direct Connection, asyncpg)
+
+## 트러블슈팅 이력
+
+### 에러 1: `ENOTFOUND` — tenant/user not found
+- **원인**: DATABASE_URL 호스트가 `aws-0-ap-northeast-1`으로 설정됨. 실제 프로젝트 pooler는 `aws-1-`
+- **수정**: `aws-0-` → `aws-1-`
+
+### 에러 2: `ModuleNotFoundError: No module named 'psycopg2'`
+- **원인**: DATABASE_URL 스키마가 `postgresql://`로 입력됨. SQLAlchemy가 기본 드라이버(psycopg2)를 찾으려 함
+- **수정**: `postgresql://` → `postgresql+asyncpg://`
+
+### 에러 3: `password authentication failed for user "postgres"`
+- **원인**: Supabase DB 비밀번호 재설정 후 Vercel 환경변수에 이전 비밀번호가 그대로 남아 있었음
+- **수정**: Supabase 비밀번호 재설정 → Vercel DATABASE_URL 전체 교체
+
+### 에러 4: `DuplicatePreparedStatementError` — prepared statement already exists
+- **원인**: Transaction Pooler(port 6543)는 트랜잭션마다 다른 백엔드 커넥션을 배정함. asyncpg가 이전 트랜잭션에서 생성한 prepared statement 이름을 새 백엔드에서 다시 생성하려다 충돌
+- **수정 1**: `NullPool` 적용 — 요청마다 새 커넥션 생성, 재사용 없음 (`backend/app/core/database.py`)
+- **수정 2**: Session Pooler(port 5432)로 전환 — 세션 동안 동일 백엔드 유지, prepared statement 충돌 없음
+
+### 에러 5: SLA 모니터링 항상 실패
+- **원인**: `.github/workflows/04_monitoring.yml`의 sla-monitor 잡 `if` 조건이 `*/5 * * * *`를 체크하지만 실제 cron은 `*/10 * * * *`로 설정되어 조건이 매칭되지 않음
+- **수정**: `if` 조건을 `*/10 * * * *` 또는 `workflow_dispatch`로 수정
+
+### 에러 6: Vercel 재배포 시 환경변수 미적용
+- **원인**: Vercel 대시보드 "Redeploy" 버튼은 prebuilt 아티팩트를 재사용 → 환경변수 변경 미적용
+- **수정**: 코드 변경(또는 empty commit)을 push하여 GitHub Actions CD 통해 fresh build 트리거
 
 ## 남은 작업
 
-1. **VERCEL_TOKEN 갱신 필수**: GitHub Secret `VERCEL_TOKEN`의 `vca_` 세션 토큰이 만료됨.
-   vercel.com/account/tokens 에서 Personal Access Token(PAT) 생성 후 GitHub Secret 교체 필요.
-   → 이 작업 전까지 CD 파이프라인 (02_cd_vercel.yml) 실행 불가
+1. **도메인 연결**: sepang.kr, partner.sepang.kr, admin.sepang.kr, api.sepang.kr → Vercel DNS
 
-2. **도메인 연결**: sepang.kr, partner.sepang.kr, admin.sepang.kr, api.sepang.kr → Vercel DNS
+2. **Toss Payments**: 클라이언트가 API 키 발급 → `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY` Vercel 등록
 
-3. **카카오 Maps 키**: https://developers.kakao.com — REST API 키 발급 후 Vercel 환경변수에 추가
-
-4. **VAPID 키 생성**: `python -c "from py_vapid import Vapid; v=Vapid(); v.generate_keys()"`
-
-5. **Firebase FCM**: 파트너 앱 푸시 알림용 서버 키 → `FCM_SERVER_KEY` 환경변수
-
-6. **NAVER SENS**: SMS 발송 환경변수 설정 (Edge Function에서 사용)
+3. **NAVER SENS**: 클라이언트가 API 키 발급 → `NAVER_SENS_SERVICE_ID`, `NAVER_SENS_ACCESS_KEY`, `NAVER_SENS_SECRET_KEY`, `NAVER_SENS_SENDER` Vercel 등록
