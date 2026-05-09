@@ -227,9 +227,11 @@ function LoginScreen() {
     setError(null);
     setLoading(true);
     try {
-      await authApi.sendOtp(phone.replace(/-/g, ""));
+      const res = await authApi.sendOtp(phone.replace(/-/g, ""));
       setStep(1);
-      setToast("인증번호가 발송되었습니다");
+      // 테스트모드: NAVER SENS 미설정 시 서버가 dev_code 반환
+      if (res.dev_code) setCode(res.dev_code);
+      setToast(res.dev_code ? `인증번호: ${res.dev_code}` : "인증번호가 발송되었습니다");
     } catch (e) {
       setError(e.message || "SMS 발송 실패");
     } finally {

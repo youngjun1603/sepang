@@ -124,7 +124,11 @@ async def send_otp(request: Request, req: SendOTPRequest, db: AsyncSession = Dep
     await db.commit()
 
     # SMS 발송 (실서비스: 카카오 알림톡 or 네이버 클라우드 SENS)
-    await send_sms(req.phone, f"[세팡] 인증번호 {code_str} (3분 유효)")
+    sms_result = await send_sms(req.phone, f"[세팡] 인증번호 {code_str} (3분 유효)")
+
+    # NAVER SENS 미설정 시 테스트용으로 코드 반환
+    if isinstance(sms_result, dict) and sms_result.get("reason") == "SENS not configured":
+        return {"message": "인증번호가 발송되었습니다 (테스트모드)", "expires_in": 180, "dev_code": code_str}
 
     return {"message": "인증번호가 발송되었습니다", "expires_in": 180}
 
