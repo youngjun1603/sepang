@@ -1,0 +1,38 @@
+name: 99 Fix OTP (테스트용)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix-otp:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-insert fresh OTP for test account
+        run: |
+          python3 - <<'EOF'
+          import hashlib
+          import urllib.request
+          import json
+
+          phone = "01000000001"
+          code  = "123456"
+          code_hash = hashlib.sha256(code.encode()).hexdigest()
+          print(f"OTP hash: {code_hash}")
+
+          sql = f"""
+          DELETE FROM otp_verifications WHERE phone = '{phone}';
+          INSERT INTO otp_verifications (phone, code, purpose, expires_at)
+          VALUES ('{phone}', '{code_hash}', 'LOGIN', NOW() + INTERVAL '120 minutes');
+          """
+
+          url = "https://api.supabase.com/v1/projects/${{ secrets.SUPABASE_PROJECT_REF }}/database/query"
+          payload = json.dumps({"query": sql}).encode()
+          req = urllib.request.Request(url, data=payload, method="POST")
+          req.add_header("Authorization", "Bearer ${{ secrets.SUPABASE_ACCESS_TOKEN }}")
+          req.add_header("Content-Type", "application/json")
+
+          with urllib.request.urlopen(req) as resp:
+              body = resp.read().decode()
+              print("Response:", body)
+          print("Done — OTP 123456 valid for 120 minutes")
+          EOF
