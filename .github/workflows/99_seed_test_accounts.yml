@@ -20,8 +20,8 @@ jobs:
             '\$2b\$10\$Cdctu5QdCswSjDuPVJSQ1enSbG5ajuxN9snEudVnCIii0Qj9rbYwu', true)
           ON CONFLICT (phone) DO NOTHING;
 
-          INSERT INTO shops (owner_id, name, region, team_type, is_active, is_available, location, address)
-          SELECT id, '테스트세탁소', '경기도 수원시', 'BOTH', true, true,
+          INSERT INTO shops (owner_id, name, team_type, is_active, is_available, location, address)
+          SELECT id, '테스트세탁소', 'BOTH', true, true,
             ST_SetSRID(ST_MakePoint(127.0276, 37.2636), 4326),
             '경기도 수원시 장안구 수성로275번길 51'
           FROM users WHERE phone = '01000000002' AND role = 'PARTNER'
