@@ -265,7 +265,12 @@ function LoginScreen() {
           </div>
           {step === 0 ? (
             <input className="input" style={{ marginBottom: 4 }} placeholder="010-0000-0000"
-              value={phone} onChange={e => setPhone(e.target.value)}
+              value={phone} onChange={e => {
+                const d = e.target.value.replace(/\D/g, "").slice(0, 11);
+                const fmt = d.length > 7 ? `${d.slice(0,3)}-${d.slice(3,7)}-${d.slice(7)}`
+                          : d.length > 3 ? `${d.slice(0,3)}-${d.slice(3)}` : d;
+                setPhone(fmt);
+              }}
               onKeyDown={e => e.key === "Enter" && handleSendOtp()} />
           ) : (
             <input className="input" style={{ marginBottom: 4 }} placeholder="인증번호 6자리"
