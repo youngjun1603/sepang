@@ -165,6 +165,25 @@ const CSS = `
   .login-wrap { min-height: 100vh; background: linear-gradient(160deg,#0057FF 0%,#003DC7 40%,#0D0D30 100%); padding: 60px 28px 32px; display: flex; flex-direction: column; }
   .login-box { background: white; border-radius: 22px; padding: 28px; }
   .error-msg { color: var(--red); font-size: 12px; margin-top: 8px; }
+  .legal-wrap { max-width: 430px; margin: 0 auto; min-height: 100vh; background: white; display: flex; flex-direction: column; box-shadow: 0 0 60px rgba(0,0,0,.1); }
+  .legal-header { background: white; padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 10; }
+  .legal-body { flex: 1; overflow-y: auto; padding: 20px 20px 48px; }
+  .legal-h1 { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+  .legal-date { font-size: 11px; color: var(--muted); margin-bottom: 24px; }
+  .legal-section { margin-bottom: 22px; }
+  .legal-section h2 { font-size: 14px; font-weight: 700; margin-bottom: 8px; color: #222; }
+  .legal-section p, .legal-section li { font-size: 13px; color: #444; line-height: 1.8; }
+  .legal-section ul { padding-left: 18px; }
+  .legal-section li { margin-bottom: 4px; }
+  .legal-biz-box { background: var(--surface); border-radius: 12px; padding: 14px 16px; margin-top: 6px; }
+  .legal-biz-row { display: flex; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .legal-biz-row:last-child { border-bottom: none; }
+  .legal-biz-lbl { color: var(--muted); width: 90px; flex-shrink: 0; }
+  .legal-biz-val { color: #222; font-weight: 500; }
+  .biz-footer { padding: 20px 16px 32px; background: var(--surface); border-top: 1px solid var(--border); }
+  .biz-footer-title { font-size: 11px; color: #aaa; font-weight: 700; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .5px; }
+  .biz-footer-row { display: flex; gap: 6px; font-size: 11px; color: #bbb; margin-bottom: 4px; }
+  .biz-footer-lbl { width: 80px; flex-shrink: 0; }
 `;
 
 // ─── Components ───────────────────────────────────────────────────────────────
@@ -265,8 +284,14 @@ function LoginScreen() {
               다시 받기
             </button>
           )}
-          <div style={{ marginTop: 16, fontSize: 11, color: "#aaa", textAlign: "center" }}>
-            가입하면 서비스 이용약관 및 개인정보처리방침에 동의합니다
+          <div style={{ marginTop: 16, fontSize: 11, color: "#aaa", textAlign: "center", lineHeight: 1.8 }}>
+            가입하면{" "}
+            <span style={{ color: "var(--blue)", textDecoration: "underline", cursor: "pointer" }}
+              onClick={() => { window.open("/terms", "_blank"); }}>서비스 이용약관</span>
+            {" "}및{" "}
+            <span style={{ color: "var(--blue)", textDecoration: "underline", cursor: "pointer" }}
+              onClick={() => { window.open("/privacy", "_blank"); }}>개인정보처리방침</span>
+            에 동의합니다
           </div>
         </div>
         {toast && <Toast msg={toast} onHide={() => setToast(null)} />}
@@ -795,10 +820,12 @@ function MyPageScreen() {
   const { user, logout } = useAuth();
   const { navigate } = useRouter();
   const menus = [
-    ["📍", "배송지 관리", user?.address || "미설정"],
-    ["🔔", "알림 설정", "ON"],
-    ["⭐", "리뷰 관리", ""],
-    ["📞", "고객센터", "1:1 문의"],
+    ["📍", "배송지 관리", user?.address || "미설정", null],
+    ["🔔", "알림 설정", "ON", null],
+    ["⭐", "리뷰 관리", "", null],
+    ["📞", "고객센터", "thisokya@gmail.com", null],
+    ["📄", "이용약관", "", "/terms"],
+    ["🔒", "개인정보처리방침", "", "/privacy"],
   ];
   return (
     <><style>{CSS}</style>
@@ -817,8 +844,8 @@ function MyPageScreen() {
             </div>
           </div>
           <div className="divider" />
-          {menus.map(([icon, label, sub], i) => (
-            <div key={i} className="list-item">
+          {menus.map(([icon, label, sub, to], i) => (
+            <div key={i} className="list-item" onClick={() => to && navigate(to)} style={{ cursor: to ? "pointer" : "default" }}>
               <span style={{ fontSize: 20, width: 28, textAlign: "center" }}>{icon}</span>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 600 }}>{label}</div>
@@ -828,10 +855,30 @@ function MyPageScreen() {
             </div>
           ))}
           <div className="divider" />
-          <div style={{ padding: "16px 16px 32px", background: "white" }}>
+          <div style={{ padding: "16px 16px 20px", background: "white" }}>
             <button onClick={logout} style={{ width: "100%", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, fontSize: 14, fontWeight: 700, color: "var(--muted)", cursor: "pointer" }}>
               로그아웃
             </button>
+          </div>
+          {/* 사업자 정보 (전자상거래법 제10조) */}
+          <div className="biz-footer">
+            <div className="biz-footer-title">사업자 정보</div>
+            {[
+              ["상호", "주식회사 수정컴퍼니"],
+              ["대표자", "박윤선"],
+              ["사업자번호", "171-86-03467"],
+              ["통신판매업", "제 2024-수원장안-0620 호"],
+              ["주소", "경기도 수원시 장안구 수성로275번길 51, 3층"],
+              ["이메일", "thisokya@gmail.com"],
+            ].map(([l, v]) => (
+              <div key={l} className="biz-footer-row">
+                <span className="biz-footer-lbl">{l}</span>
+                <span>{v}</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 12, fontSize: 10, color: "#ccc", lineHeight: 1.7 }}>
+              © 2024 주식회사 수정컴퍼니. All rights reserved.
+            </div>
           </div>
         </div>
         <BottomNav active={3} />
@@ -1004,6 +1051,205 @@ function PaymentFailScreen() {
   );
 }
 
+// ─── 이용약관 ─────────────────────────────────────────────────────────────────
+function TermsScreen() {
+  const { navigate } = useRouter();
+  return (
+    <><style>{CSS}</style>
+      <div className="legal-wrap fu">
+        <div className="legal-header">
+          <button onClick={() => navigate("/mypage")} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer" }}>←</button>
+          <div style={{ fontFamily: "var(--font-d)", fontSize: 16, fontWeight: 800 }}>이용약관</div>
+        </div>
+        <div className="legal-body">
+          <div className="legal-h1">세팡 서비스 이용약관</div>
+          <div className="legal-date">시행일: 2024년 08월 10일 | 최종 개정: 2024년 08월 10일</div>
+
+          <div className="legal-section">
+            <h2>제1조 (목적)</h2>
+            <p>이 약관은 주식회사 수정컴퍼니(이하 "회사")가 운영하는 세팡(sepang.kr) 세탁 O2O 플랫폼 서비스(이하 "서비스")의 이용 조건 및 절차, 회사와 이용자의 권리·의무·책임 사항을 규정함을 목적으로 합니다.</p>
+          </div>
+
+          <div className="legal-section">
+            <h2>제2조 (사업자 정보)</h2>
+            <div className="legal-biz-box">
+              {[["상호","주식회사 수정컴퍼니"],["대표자","박윤선"],["사업자등록번호","171-86-03467"],["통신판매업신고번호","제 2024-수원장안-0620 호"],["소재지","경기도 수원시 장안구 수성로275번길 51, 3층(정자동)"],["이메일","thisokya@gmail.com"]].map(([l,v])=>(
+                <div key={l} className="legal-biz-row"><span className="legal-biz-lbl">{l}</span><span className="legal-biz-val">{v}</span></div>
+              ))}
+            </div>
+          </div>
+
+          <div className="legal-section">
+            <h2>제3조 (서비스 내용)</h2>
+            <p>회사는 다음의 세탁 O2O 중개 서비스를 제공합니다.</p>
+            <ul>
+              <li>당일 수거 세탁 서비스 (오전 9시 수거 → 당일 오후 배송)</li>
+              <li>새벽 수거 세탁 서비스 (오후 9시 수거 → 익일 새벽 배송)</li>
+              <li>세탁물 수거, 세탁, 건조 및 배송 완료까지 12시간 이내 완료</li>
+              <li>앱 내 실시간 주문 추적 서비스</li>
+            </ul>
+          </div>
+
+          <div className="legal-section">
+            <h2>제4조 (회원가입 및 이용)</h2>
+            <ul>
+              <li>회원가입은 휴대폰 번호 인증(OTP)으로 진행됩니다.</li>
+              <li>1인당 1개의 계정만 사용할 수 있습니다.</li>
+              <li>만 14세 미만 아동은 서비스를 이용할 수 없습니다.</li>
+              <li>타인의 정보를 도용하거나 허위 정보를 등록하는 것을 금지합니다.</li>
+            </ul>
+          </div>
+
+          <div className="legal-section">
+            <h2>제5조 (요금 및 결제)</h2>
+            <ul>
+              <li>서비스 이용 요금은 앱 내 고지된 금액을 기준으로 합니다.</li>
+              <li>결제는 토스페이먼츠를 통한 신용/체크카드, 간편결제로 진행됩니다.</li>
+              <li>결제 완료 시 이메일 또는 앱 푸시 알림으로 결제 내역을 안내합니다.</li>
+            </ul>
+          </div>
+
+          <div className="legal-section">
+            <h2>제6조 (취소 및 환불)</h2>
+            <ul>
+              <li>수거 전(점주 수락 전): 앱 내에서 즉시 취소 및 전액 환불 가능</li>
+              <li>수거 완료 후: 세탁물 하자 등 회사 귀책 사유가 있는 경우에 한해 환불</li>
+              <li>환불은 결제 수단에 따라 3~5 영업일 이내 처리됩니다.</li>
+              <li>소비자보호법 제17조에 따른 청약철회는 서비스 특성상 수거 완료 후 적용되지 않습니다.</li>
+            </ul>
+          </div>
+
+          <div className="legal-section">
+            <h2>제7조 (회사의 의무)</h2>
+            <ul>
+              <li>회사는 서비스 안정적 운영을 위해 최선을 다합니다.</li>
+              <li>개인정보보호법에 따라 이용자의 개인정보를 안전하게 관리합니다.</li>
+              <li>서비스 장애 발생 시 즉시 복구하기 위해 노력합니다.</li>
+            </ul>
+          </div>
+
+          <div className="legal-section">
+            <h2>제8조 (이용자의 의무)</h2>
+            <ul>
+              <li>이용자는 정확한 수거·배송 주소를 입력해야 합니다.</li>
+              <li>세탁 불가 품목(가죽, 모피, 특수 직물 등)은 주문하지 않아야 합니다.</li>
+              <li>회사 및 파트너 점주에 대한 허위 리뷰, 비방 행위를 금지합니다.</li>
+            </ul>
+          </div>
+
+          <div className="legal-section">
+            <h2>제9조 (면책)</h2>
+            <p>천재지변, 불가항력적 사유로 인한 서비스 중단, 이용자의 귀책사유로 인한 손해에 대해 회사는 책임을 지지 않습니다. 단, 회사의 고의 또는 중과실로 인한 손해는 예외입니다.</p>
+          </div>
+
+          <div className="legal-section">
+            <h2>제10조 (분쟁 해결)</h2>
+            <p>서비스 이용과 관련한 분쟁은 회사 소재지를 관할하는 수원지방법원을 제1심 관할 법원으로 합니다.</p>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── 개인정보처리방침 ──────────────────────────────────────────────────────────
+function PrivacyScreen() {
+  const { navigate } = useRouter();
+  return (
+    <><style>{CSS}</style>
+      <div className="legal-wrap fu">
+        <div className="legal-header">
+          <button onClick={() => navigate("/mypage")} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer" }}>←</button>
+          <div style={{ fontFamily: "var(--font-d)", fontSize: 16, fontWeight: 800 }}>개인정보처리방침</div>
+        </div>
+        <div className="legal-body">
+          <div className="legal-h1">개인정보처리방침</div>
+          <div className="legal-date">시행일: 2024년 08월 10일 | 최종 개정: 2024년 08월 10일</div>
+
+          <div className="legal-section">
+            <h2>제1조 (개인정보의 처리 목적)</h2>
+            <p>주식회사 수정컴퍼니(이하 "회사")는 다음 목적을 위해 개인정보를 처리합니다.</p>
+            <ul>
+              <li>회원 가입 및 본인 인증</li>
+              <li>세탁 서비스 주문 접수, 수거, 배송 처리</li>
+              <li>결제 및 환불 처리</li>
+              <li>고객 문의 응대 및 불만 처리</li>
+              <li>서비스 이용 통계 분석 및 품질 개선</li>
+            </ul>
+          </div>
+
+          <div className="legal-section">
+            <h2>제2조 (수집하는 개인정보 항목)</h2>
+            <ul>
+              <li><strong>필수:</strong> 휴대폰 번호, 이름(닉네임), 수거·배송 주소, 결제 정보</li>
+              <li><strong>자동 수집:</strong> 서비스 이용 기록, 기기 정보, 접속 로그, IP 주소</li>
+              <li><strong>선택:</strong> 리뷰 내용, 고객 문의 내용</li>
+            </ul>
+          </div>
+
+          <div className="legal-section">
+            <h2>제3조 (개인정보의 보유 및 이용 기간)</h2>
+            <ul>
+              <li>회원 정보: 회원 탈퇴 시까지 (단, 관계 법령에 따라 보존 필요 시 해당 기간)</li>
+              <li>거래 기록 및 결제 정보: 전자상거래법에 따라 5년</li>
+              <li>소비자 불만·분쟁 기록: 소비자보호법에 따라 3년</li>
+              <li>접속 로그: 통신비밀보호법에 따라 3개월</li>
+            </ul>
+          </div>
+
+          <div className="legal-section">
+            <h2>제4조 (개인정보의 제3자 제공)</h2>
+            <p>회사는 이용자의 개인정보를 원칙적으로 외부에 제공하지 않습니다. 다만, 서비스 제공을 위해 아래의 경우에 한해 제공합니다.</p>
+            <ul>
+              <li><strong>제공 대상:</strong> 제휴 세탁 파트너 점포</li>
+              <li><strong>제공 항목:</strong> 이름, 수거·배송 주소, 연락처</li>
+              <li><strong>제공 목적:</strong> 세탁물 수거 및 배송 처리</li>
+              <li><strong>보유 기간:</strong> 서비스 완료 후 즉시 파기</li>
+            </ul>
+          </div>
+
+          <div className="legal-section">
+            <h2>제5조 (개인정보 처리 위탁)</h2>
+            <ul>
+              <li><strong>수탁자:</strong> 토스페이먼츠 | <strong>목적:</strong> 결제 처리</li>
+              <li><strong>수탁자:</strong> 네이버 클라우드(SENS) | <strong>목적:</strong> SMS 인증번호 발송</li>
+              <li><strong>수탁자:</strong> Supabase | <strong>목적:</strong> 데이터베이스 및 서비스 운영</li>
+            </ul>
+          </div>
+
+          <div className="legal-section">
+            <h2>제6조 (정보주체의 권리·의무)</h2>
+            <p>이용자는 언제든지 다음의 권리를 행사할 수 있습니다.</p>
+            <ul>
+              <li>개인정보 열람, 정정, 삭제, 처리 정지 요청</li>
+              <li>마이페이지 → 회원탈퇴를 통한 계정 삭제</li>
+              <li>개인정보 관련 문의: thisokya@gmail.com</li>
+            </ul>
+          </div>
+
+          <div className="legal-section">
+            <h2>제7조 (개인정보보호책임자)</h2>
+            <div className="legal-biz-box">
+              {[["성명","박윤선"],["직책","대표이사"],["이메일","thisokya@gmail.com"],["주소","경기도 수원시 장안구 수성로275번길 51, 3층"]].map(([l,v])=>(
+                <div key={l} className="legal-biz-row"><span className="legal-biz-lbl">{l}</span><span className="legal-biz-val">{v}</span></div>
+              ))}
+            </div>
+          </div>
+
+          <div className="legal-section">
+            <h2>제8조 (개인정보 침해 신고)</h2>
+            <p>개인정보 침해에 관한 신고·상담은 아래 기관에 문의할 수 있습니다.</p>
+            <ul>
+              <li>개인정보보호위원회: privacy.go.kr / 국번없이 182</li>
+              <li>한국인터넷진흥원(KISA): privacy.kisa.or.kr / 국번없이 118</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Route Switch ─────────────────────────────────────────────────────────────
 function RouteSwitch() {
   const { path } = useRouter();
@@ -1022,6 +1268,8 @@ function RouteSwitch() {
     "/points":          PointsScreen,
     "/mypage":          MyPageScreen,
     "/review":          ReviewScreen,
+    "/terms":           TermsScreen,
+    "/privacy":         PrivacyScreen,
   };
   const C = map[path] || LoginScreen;
   return <C />;
