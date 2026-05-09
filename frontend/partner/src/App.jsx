@@ -209,7 +209,10 @@ function LoginScreen() {
         <div style={{fontSize:14,fontWeight:700,color:"white",marginBottom:14}}>점주 로그인</div>
         {error && <div className="error-msg" style={{marginBottom:10}}>{error}</div>}
         <label style={{fontSize:11,color:"#555",marginBottom:3,display:"block"}}>아이디 (사업자번호)</label>
-        <input style={inputStyle} placeholder="000-00-00000" value={id} onChange={e=>setId(e.target.value)}/>
+        <input style={inputStyle} placeholder="000-00-00000" value={id} onChange={e=>{
+          const d = e.target.value.replace(/\D/g,"").slice(0,10);
+          setId(d.length>5 ? `${d.slice(0,3)}-${d.slice(3,5)}-${d.slice(5)}` : d.length>3 ? `${d.slice(0,3)}-${d.slice(3)}` : d);
+        }}/>
         <label style={{fontSize:11,color:"#555",marginBottom:3,display:"block"}}>비밀번호</label>
         <input style={{...inputStyle,marginBottom:16}} type="password" placeholder="••••••••" value={pw} onChange={e=>setPw(e.target.value)}/>
         <button style={{width:"100%",background:"var(--yellow)",color:"#111",borderRadius:10,padding:"13px",fontSize:14,fontWeight:900,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}

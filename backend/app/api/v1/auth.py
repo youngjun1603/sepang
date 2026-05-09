@@ -56,7 +56,7 @@ class PartnerLoginRequest(BaseModel):
 
 class AdminLoginRequest(BaseModel):
     email:    str
-    password: str = Field(..., min_length=12)
+    password: str = Field(..., min_length=8)
 
 class AdminOTPRequest(BaseModel):
     temp_token: str   # 1단계 완료 임시 토큰

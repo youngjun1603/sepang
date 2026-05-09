@@ -63,7 +63,11 @@ export async function apiFetch<T>(path: string, opts: FetchOptions = {}): Promis
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: "서버 오류가 발생했습니다" }));
-    throw new ApiError(res.status, body.detail ?? body.message ?? "오류가 발생했습니다");
+    let detail = body.detail ?? body.message ?? "오류가 발생했습니다";
+    if (Array.isArray(detail)) {
+      detail = detail.map((e: any) => e.msg ?? String(e)).join(", ");
+    }
+    throw new ApiError(res.status, String(detail));
   }
 
   if (res.status === 204) return undefined as T;
