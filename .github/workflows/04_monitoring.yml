@@ -11,13 +11,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ── 헬스 체크 (5분마다) ──────────────────────────────────
+  # ── 헬스 체크 (10분마다) ─────────────────────────────────
   health-check:
     name: "Health check"
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.schedule == '*/5 * * * *'
+      github.event.schedule == '*/10 * * * *'
 
     steps:
       - name: Check all endpoints
