@@ -1,0 +1,30 @@
+name: Fix test OTP (one-time)
+on:
+  workflow_dispatch:
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Insert correct OTP for test customer
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          SQL="
+          DELETE FROM otp_verifications WHERE phone = '01000000001';
+          INSERT INTO otp_verifications (phone, code, purpose, expires_at)
+          VALUES (
+            '01000000001',
+            '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92',
+            'LOGIN',
+            NOW() + INTERVAL '30 minutes'
+          );
+          SELECT phone, LEFT(code,16)||'...' AS code_preview, expires_at, attempts
+          FROM otp_verifications WHERE phone = '01000000001';
+          "
+          RESPONSE=$(curl -s -X POST \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"query\": $(echo "$SQL" | jq -Rs .)}")
+          echo "$RESPONSE" | jq .
