@@ -56,7 +56,9 @@ jobs:
   sla-monitor:
     name: "SLA violation monitor"
     runs-on: ubuntu-latest
-    if: github.event.schedule == '*/5 * * * *'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.schedule == '*/10 * * * *'
 
     steps:
       - name: Check SLA at-risk orders via API
