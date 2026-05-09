@@ -50,7 +50,19 @@
       "PowerShell(node -e \"const crypto = require\\('crypto'\\); const {privateKey, publicKey} = crypto.generateKeyPairSync\\('ec', {namedCurve: 'prime256v1'}\\); const priv = privateKey.export\\({type:'pkcs8', format:'der'}\\); const pub = publicKey.export\\({type:'spki', format:'der'}\\); const privB64 = Buffer.from\\(priv.slice\\(-32\\)\\).toString\\('base64url'\\); const pubB64 = Buffer.from\\(pub.slice\\(-65\\)\\).toString\\('base64url'\\); console.log\\('VAPID_PRIVATE_KEY=' + privB64\\); console.log\\('VAPID_PUBLIC_KEY=' + pubB64\\);\" 2>&1)",
       "PowerShell(npx web-push generate-vapid-keys --json 2>&1)",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\User\\\\youngjun\\\\sepang\" -Recurse -Directory)",
-      "Bash(Select-Object -ExpandProperty FullName)"
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(which python3 *)",
+      "Read(//usr/local/**)",
+      "Bash(python3 -m pip install ruff mypy pydantic-settings)",
+      "Bash(python -c \"import secrets; print\\(secrets.token_urlsafe\\(32\\)\\)\")",
+      "Bash(node -e \"const crypto = require\\('crypto'\\); console.log\\(crypto.randomBytes\\(32\\).toString\\('base64url'\\)\\);\")",
+      "Bash(npx vercel *)",
+      "Bash(python3 -c ' *)",
+      "Bash(npm root *)",
+      "Bash(node -e *)",
+      "Bash(where psql *)",
+      "Bash(npx supabase *)",
+      "Bash(Remove-Item \".github\\\\workflows\\\\99_seed_test_accounts.yml\")"
     ]
   }
 }
