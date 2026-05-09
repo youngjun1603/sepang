@@ -7,32 +7,21 @@ jobs:
   fix-otp:
     runs-on: ubuntu-latest
     steps:
-      - name: Re-insert fresh OTP for test account
+      - name: Install psql
+        run: sudo apt-get install -y postgresql-client
+
+      - name: Re-insert fresh OTP via psql
+        env:
+          PGPASSWORD: "Sepang2026!"
         run: |
-          python3 - <<'EOF'
-          import hashlib
-          import urllib.request
-          import json
+          OTP_HASH=$(python3 -c "import hashlib; print(hashlib.sha256('123456'.encode()).hexdigest())")
+          echo "OTP hash: $OTP_HASH"
 
-          phone = "01000000001"
-          code  = "123456"
-          code_hash = hashlib.sha256(code.encode()).hexdigest()
-          print(f"OTP hash: {code_hash}")
-
-          sql = f"""
-          DELETE FROM otp_verifications WHERE phone = '{phone}';
+          psql "postgresql://postgres.apghgbecayjfsuswaggf@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres" <<SQL
+          DELETE FROM otp_verifications WHERE phone = '01000000001';
           INSERT INTO otp_verifications (phone, code, purpose, expires_at)
-          VALUES ('{phone}', '{code_hash}', 'LOGIN', NOW() + INTERVAL '120 minutes');
-          """
+          VALUES ('01000000001', '$OTP_HASH', 'LOGIN', NOW() + INTERVAL '120 minutes');
+          SELECT phone, purpose, expires_at, attempts FROM otp_verifications WHERE phone = '01000000001';
+          SQL
 
-          url = "https://api.supabase.com/v1/projects/${{ secrets.SUPABASE_PROJECT_REF }}/database/query"
-          payload = json.dumps({"query": sql}).encode()
-          req = urllib.request.Request(url, data=payload, method="POST")
-          req.add_header("Authorization", "Bearer ${{ secrets.SUPABASE_ACCESS_TOKEN }}")
-          req.add_header("Content-Type", "application/json")
-
-          with urllib.request.urlopen(req) as resp:
-              body = resp.read().decode()
-              print("Response:", body)
-          print("Done — OTP 123456 valid for 120 minutes")
-          EOF
+          echo "Done — OTP 123456 valid for 120 minutes"
