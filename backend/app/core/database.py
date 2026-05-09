@@ -1,16 +1,16 @@
 """DB 연결 — SQLAlchemy 비동기"""
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 from app.core.config import settings
 
+# Vercel Serverless + Supabase Transaction Pooler 조합:
+# NullPool — 요청마다 새 커넥션, 완료 후 즉시 반환 (prepared statement 충돌 방지)
 engine = create_async_engine(
     settings.DATABASE_URL,
-    pool_size=5,
-    max_overflow=10,
-    pool_pre_ping=True,
+    poolclass=NullPool,
     echo=settings.DEBUG,
     connect_args={
-        # Supabase Transaction Pooler(port 6543)는 prepared statement 미지원
         "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
     },
