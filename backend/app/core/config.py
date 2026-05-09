@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # 관리자 IP 허용 목록 (콤마 구분, 비어있으면 모든 IP 허용)
     ADMIN_ALLOWED_IPS: str = ""
 
+    # 모니터링 전용 정적 토큰 (GitHub Actions → sla-at-risk 엔드포인트용)
+    MONITOR_API_TOKEN: str = ""
+
     # App
     ENVIRONMENT:    str = "production"
     DEBUG:          bool = False

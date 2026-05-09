@@ -15,13 +15,31 @@ from typing import Optional
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.core.auth import get_current_user, require_role
+from app.core.config import settings
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+async def _monitor_or_admin(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: AsyncSession = Depends(get_db),
+):
+    token = credentials.credentials if credentials else None
+    if settings.MONITOR_API_TOKEN and token == settings.MONITOR_API_TOKEN:
+        class _MonitorUser:
+            id = "monitor"
+            role = "ADMIN"
+        return _MonitorUser()
+    return await require_role("ADMIN")(await get_current_user(credentials))
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -221,10 +239,11 @@ async def list_shops(
 async def get_sla_at_risk(
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(require_role("ADMIN")),
+    current_user=Depends(_monitor_or_admin),
 ):
     rows = await db.execute(text("SELECT * FROM vw_sla_at_risk ORDER BY hours_left"))
-    await _audit(db, request, current_user, "SLA 위험 주문 조회")
+    if getattr(current_user, "id", None) != "monitor":
+        await _audit(db, request, current_user, "SLA 위험 주문 조회")
     return [dict(r._mapping) for r in rows.fetchall()]
 
 
