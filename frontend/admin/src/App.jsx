@@ -186,9 +186,17 @@ function Layout({ title, children, slaCount = 0 }) {
           ))}
         </div>
         <div style={{padding:"10px 6px",borderTop:"1px solid #1a1a1a"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 8px",borderRadius:7,cursor:"pointer"}} onClick={logout}>
+          <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 8px",borderRadius:7}}>
             <div style={{width:28,height:28,borderRadius:"50%",background:"#0057FF",display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontSize:10,fontWeight:700,flexShrink:0}}>관</div>
-            <div><div style={{fontSize:11,color:"white",fontWeight:600}}>{admin?.name||"관리자"}</div><div style={{fontSize:9,color:"#444"}}>로그아웃</div></div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:11,color:"white",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{admin?.name||"관리자"}</div>
+              <div style={{fontSize:9,color:"#444"}}>{admin?.email||""}</div>
+            </div>
+            <button
+              onClick={() => { if (window.confirm("로그아웃 하시겠습니까?")) logout(); }}
+              style={{flexShrink:0,background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:6,color:"#666",fontSize:10,padding:"4px 8px",cursor:"pointer",whiteSpace:"nowrap"}}>
+              로그아웃
+            </button>
           </div>
         </div>
       </div>
