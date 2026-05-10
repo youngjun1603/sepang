@@ -626,21 +626,108 @@ function LogsPage() {
 }
 
 function MarketingPage() {
+  const { data: stats, loading, error } = useApi(() => adminApi.marketing(), []);
+
+  const fcmRate = stats && stats.total_customers > 0
+    ? Math.round(stats.fcm_opt_in / stats.total_customers * 100)
+    : 0;
+
+  const scenarios = stats ? [
+    { seg: "가입 후 미주문 3일", trigger: "매일 09:00 KST (GitHub Actions)", msg: "🎁 첫 주문 할인", target: stats.d3_target, badge: "ab-blue" },
+    { seg: "금요일 Night 이용자", trigger: "매주 금요일 20:00 KST (GitHub Actions)", msg: "🌙 주말 알림", target: stats.night_target, badge: "ab-purple" },
+    { seg: "D+0 신규 가입 웰컴", trigger: "즉시 (주문 생성 시 자동)", msg: "🎉 WELCOME3000 쿠폰", target: stats.new_week, badge: "ab-green" },
+  ] : [];
+
   return (
     <Layout title="마케팅/CRM"><style>{CSS}</style>
-      <div className="card">
-        <div className="card-title">CRM 자동 푸시 시나리오</div>
-        <div style={{color:"#888",fontSize:12,padding:"20px 0",textAlign:"center"}}>Celery Beat 스케줄에 의해 자동 실행됩니다.<br/>tasks.py에서 CRM 시나리오를 관리하세요.</div>
-        {[{seg:"가입 후 미주문 3일",trigger:"가입 D+3 09:00",msg:"🎁 첫 주문 할인",st:"SCHEDULED"},
-          {seg:"금요일 Night 이용자",trigger:"금요일 20:00",msg:"🌙 주말 알림",st:"SCHEDULED"},
-          {seg:"D+0 신규 가입 웰컴",trigger:"즉시",msg:"🎉 웰컴 쿠폰",st:"ACTIVE"},
-        ].map((c,i)=>(
-          <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"9px 0",borderBottom:"1px solid #F8F8F8",fontSize:12}}>
-            <div><div style={{fontWeight:700}}>{c.seg}</div><div style={{fontSize:10,color:"#888"}}>{c.trigger} · {c.msg}</div></div>
-            <span className={`badge ${c.st==="ACTIVE"?"ab-green":"ab-blue"}`}>{c.st==="ACTIVE"?"실행중":"예약중"}</span>
+      {loading ? <Spinner/> : error ? <ErrorBox msg={error}/> : <>
+        {/* 고객 현황 KPI */}
+        <div className="kpi-grid" style={{gridTemplateColumns:"repeat(4,1fr)"}}>
+          {[
+            {l:"전체 고객",    v:stats?.total_customers?.toLocaleString()??"0",  c:"blue",  i:"👥"},
+            {l:"오늘 신규",    v:`+${stats?.new_today??0}명`,                     c:"green", i:"🆕"},
+            {l:"주간 신규",    v:`+${stats?.new_week??0}명`,                      c:"yellow",i:"📅"},
+            {l:"FCM 구독율",   v:`${fcmRate}%`,                                  c:"blue",  i:"🔔"},
+          ].map((k,i)=>(
+            <div key={i} className={`kpi ${k.c} fu`} style={{animationDelay:`${i*.05}s`}}>
+              <div className="kpi-lbl">{k.l}</div>
+              <div className="kpi-val" style={{fontSize:20}}>{k.v}</div>
+              <div className="kpi-icon">{k.i}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="g2">
+          {/* CRM 자동 푸시 시나리오 */}
+          <div className="card">
+            <div className="card-title">
+              CRM 자동 푸시 시나리오
+              <span style={{fontSize:10,color:"#888",fontWeight:400}}>GitHub Actions 스케줄</span>
+            </div>
+            {scenarios.map((c,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"10px 0",borderBottom:"1px solid #F8F8F8"}}>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:700,fontSize:12,marginBottom:3}}>{c.seg}</div>
+                  <div style={{fontSize:10,color:"#888",marginBottom:2}}>{c.trigger}</div>
+                  <div style={{fontSize:10,color:"#555"}}>{c.msg}</div>
+                </div>
+                <div style={{textAlign:"right",flexShrink:0,marginLeft:12}}>
+                  <span className={`badge ${c.badge}`} style={{marginBottom:4,display:"block"}}>예약중</span>
+                  <div style={{fontSize:10,color:"#888"}}>대상 <strong style={{color:"#333"}}>{c.target.toLocaleString()}명</strong></div>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+
+          {/* 포인트 현황 */}
+          <div className="card">
+            <div className="card-title">포인트 현황</div>
+            {[
+              {l:"총 발급 포인트",  v:`${(stats?.points_issued??0).toLocaleString()}P`,   c:"#0057FF"},
+              {l:"총 사용 포인트",  v:`${(stats?.points_redeemed??0).toLocaleString()}P`, c:"#FF3D00"},
+              {l:"잔여 포인트 합계",v:`${((stats?.points_issued??0)-(stats?.points_redeemed??0)).toLocaleString()}P`, c:"#00C853"},
+            ].map(({l,v,c},i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #F8F8F8",fontSize:12}}>
+                <span style={{color:"#888"}}>{l}</span>
+                <span style={{fontFamily:"'Syne',sans-serif",fontWeight:800,color:c}}>{v}</span>
+              </div>
+            ))}
+            <div style={{marginTop:10,padding:"8px 10px",background:"#F6F7FB",borderRadius:7,fontSize:10,color:"#888"}}>
+              ℹ️ 리뷰 작성(+100P), 주문 사용(-포인트) 기준
+            </div>
+          </div>
+        </div>
+
+        {/* 쿠폰 사용 현황 */}
+        <div className="card">
+          <div className="card-title">쿠폰 사용 현황</div>
+          {(!stats?.coupons || stats.coupons.length === 0)
+            ? <div style={{color:"#888",fontSize:12,padding:"16px 0",textAlign:"center"}}>등록된 쿠폰이 없습니다</div>
+            : <table className="tbl">
+                <thead><tr><th>코드</th><th>쿠폰명</th><th>발급</th><th>사용</th><th>사용률</th></tr></thead>
+                <tbody>{stats.coupons.map((c,i)=>{
+                  const rate = c.issued_count > 0 ? Math.round(c.used_count / c.issued_count * 100) : 0;
+                  return (
+                    <tr key={i}>
+                      <td style={{fontFamily:"monospace",fontWeight:700,color:"#0057FF"}}>{c.code}</td>
+                      <td style={{fontWeight:600}}>{c.name}</td>
+                      <td>{c.issued_count.toLocaleString()}건</td>
+                      <td style={{fontWeight:700}}>{c.used_count.toLocaleString()}건</td>
+                      <td>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <div style={{flex:1,height:6,background:"#F0F0F0",borderRadius:3,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${rate}%`,background:rate>70?"#0057FF":rate>40?"#FFD600":"#E0E0E0",borderRadius:3}}/>
+                          </div>
+                          <span style={{fontSize:10,fontWeight:700,width:28,textAlign:"right"}}>{rate}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
+          }
+        </div>
+      </>}
     </Layout>
   );
 }
@@ -778,9 +865,9 @@ function SettingsPage() {
       <div className="g2">
         <div className="card">
           <div className="card-title">API 엔드포인트</div>
-          {[["POST","/api/v1/orders","주문 생성"],["PATCH","/api/v1/orders/:id/status","상태 변경"],["GET","/api/v1/orders/partner/nearby","점포 매칭"],["GET","/api/v1/admin/settlements","정산 배치"],["GET","/api/v1/admin/dashboard","대시보드 KPI"],["WS","/ws/orders/:id","실시간 추적"]].map(([m,ep,desc],i)=>(
+          {[["POST","/api/v1/orders","주문 생성"],["PATCH","/api/v1/orders/:id/status","상태 변경"],["GET","/api/v1/orders/partner/nearby","점포 매칭"],["GET","/api/v1/admin/settlements","정산 배치"],["GET","/api/v1/admin/dashboard","대시보드 KPI"],["RT","Supabase Realtime","실시간 주문 추적"]].map(([m,ep,desc],i)=>(
             <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid #F8F8F8",fontSize:11}}>
-              <span style={{fontFamily:"monospace",fontWeight:700,width:40,color:m==="GET"?"#00C853":m==="WS"?"#E65100":"#0057FF"}}>{m}</span>
+              <span style={{fontFamily:"monospace",fontWeight:700,width:40,color:m==="GET"?"#00C853":m==="RT"?"#7C4DFF":"#0057FF"}}>{m}</span>
               <span style={{fontFamily:"monospace",color:"#444",flex:1}}>{ep}</span>
               <span style={{color:"#888"}}>{desc}</span>
             </div>

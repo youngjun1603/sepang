@@ -14,6 +14,10 @@ concurrency:
 
 env:
   NODE_VERSION: "20"
+  # 도메인 연결 후 아래 3줄만 변경 (코드 수정 없이 URL 전환)
+  API_URL:      https://sepang-api.vercel.app      # 연결 후: https://api.sepang.kr
+  CUSTOMER_URL: https://sepang-customer.vercel.app  # 연결 후: https://sepang.kr
+  PARTNER_URL:  https://sepang-partner.vercel.app   # 연결 후: https://partner.sepang.kr
 
 jobs:
   # ── DB 마이그레이션 (Alembic → Supabase PostgreSQL) ─────────────
@@ -107,7 +111,7 @@ jobs:
           VERCEL_PROJECT_ID:          ${{ secrets.VERCEL_PROJECT_ID_CUSTOMER }}
           NEXT_PUBLIC_SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_API_URL:        https://sepang-api.vercel.app
+          NEXT_PUBLIC_API_URL:        ${{ env.API_URL }}
 
       - name: Deploy prebuilt
         working-directory: frontend/customer
@@ -161,7 +165,7 @@ jobs:
           VERCEL_PROJECT_ID:          ${{ secrets.VERCEL_PROJECT_ID_PARTNER }}
           NEXT_PUBLIC_SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_API_URL:        https://sepang-api.vercel.app
+          NEXT_PUBLIC_API_URL:        ${{ env.API_URL }}
 
       - name: Deploy prebuilt
         working-directory: frontend/partner
@@ -215,7 +219,7 @@ jobs:
           VERCEL_PROJECT_ID:          ${{ secrets.VERCEL_PROJECT_ID_ADMIN }}
           NEXT_PUBLIC_SUPABASE_URL:   ${{ secrets.SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_API_URL:        https://sepang-api.vercel.app
+          NEXT_PUBLIC_API_URL:        ${{ env.API_URL }}
 
       - name: Deploy prebuilt
         working-directory: frontend/admin
@@ -259,13 +263,13 @@ jobs:
     steps:
       - name: Health check — API
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://sepang-api.vercel.app/health)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.API_URL }}/health)
           [ "$STATUS" = "200" ] || (echo "API health check failed: $STATUS" && exit 1)
           echo "API OK"
 
       - name: Health check — Customer
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://sepang-customer.vercel.app)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.CUSTOMER_URL }})
           [ "$STATUS" = "200" ] || (echo "Customer health check failed: $STATUS" && exit 1)
           echo "Customer OK"
 
@@ -276,7 +280,7 @@ jobs:
         with:
           payload: |
             {
-              "text": "✅ *프로덕션 배포 완료*\nSHA: `${{ github.sha }}`\n배포자: ${{ github.actor }}\n<https://sepang-customer.vercel.app|고객앱> | <https://sepang-partner.vercel.app|점주앱>"
+              "text": "✅ *프로덕션 배포 완료*\nSHA: `${{ github.sha }}`\n배포자: ${{ github.actor }}\n<${{ env.CUSTOMER_URL }}|고객앱> | <${{ env.PARTNER_URL }}|점주앱>"
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

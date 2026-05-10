@@ -213,6 +213,9 @@ export const adminApi = {
   auditLogs: () =>
     apiFetch<AuditLog[]>("/api/v1/admin/audit-logs"),
 
+  marketing: () =>
+    apiFetch<MarketingStats>("/api/v1/admin/marketing"),
+
   markSettlementPaid: (id: string) =>
     apiFetch<{ success: boolean }>(`/api/v1/admin/settlements/${id}/pay`, { method: "PATCH" }),
 };
@@ -382,6 +385,17 @@ export interface Coupon {
   id: string; name: string; code: string;
   discount_amount?: number; discount_rate?: number;
   min_order_amount: number; expires_at?: string;
+}
+
+export interface CouponStat {
+  code: string; name: string; used_count: number; issued_count: number;
+}
+
+export interface MarketingStats {
+  total_customers: number; new_today: number; new_week: number; fcm_opt_in: number;
+  points_issued: number; points_redeemed: number;
+  coupons: CouponStat[];
+  d3_target: number; night_target: number;
 }
 
 export type OrderStatus =

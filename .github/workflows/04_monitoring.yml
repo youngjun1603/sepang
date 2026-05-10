@@ -4,6 +4,12 @@
 # ============================================================
 name: Monitoring & Health
 
+# 도메인 연결 후 아래 변수만 변경
+env:
+  API_URL:      https://sepang-api.vercel.app      # 연결 후: https://api.sepang.kr
+  CUSTOMER_URL: https://sepang-customer.vercel.app  # 연결 후: https://sepang.kr
+  PARTNER_URL:  https://sepang-partner.vercel.app   # 연결 후: https://partner.sepang.kr
+
 on:
   schedule:
     - cron: "*/10 * * * *"   # 10분마다 — 헬스 체크
@@ -34,10 +40,10 @@ jobs:
               echo "✅ $NAME — $STATUS"
             fi
           }
-          check "https://sepang-api.vercel.app/health"            "API Health"
-          check "https://sepang-api.vercel.app/api/v1/health/db"  "DB Connection"
-          check "https://sepang-customer.vercel.app"              "Customer App"
-          check "https://sepang-partner.vercel.app"               "Partner App"
+          check "${{ env.API_URL }}/health"            "API Health"
+          check "${{ env.API_URL }}/api/v1/health/db"  "DB Connection"
+          check "${{ env.CUSTOMER_URL }}"              "Customer App"
+          check "${{ env.PARTNER_URL }}"               "Partner App"
           exit $FAILED
 
       - name: Alert on failure
@@ -75,7 +81,7 @@ jobs:
           fi
           RESPONSE=$(curl -sf \
             -H "Authorization: Bearer $MONITOR_API_TOKEN" \
-            "https://sepang-api.vercel.app/api/v1/admin/sla-at-risk" \
+            "${{ env.API_URL }}/api/v1/admin/sla-at-risk" \
             --max-time 15 || echo '[]')
           COUNT=$(echo "$RESPONSE" | python3 -c "import sys,json; data=json.load(sys.stdin); print(len(data))" 2>/dev/null || echo "0")
           BREACHED=$(echo "$RESPONSE" | python3 -c "
@@ -109,7 +115,7 @@ jobs:
       - name: Verify Supabase DB connection
         run: |
           STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
-            "https://sepang-api.vercel.app/api/v1/health/db" --max-time 20 || echo "000")
+            "${{ env.API_URL }}/api/v1/health/db" --max-time 20 || echo "000")
           echo "DB health status: $STATUS"
           if [ "$STATUS" != "200" ]; then
             echo "::error::Supabase DB connection failed — HTTP $STATUS"
@@ -121,7 +127,7 @@ jobs:
         continue-on-error: true
         run: |
           STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
-            "https://sepang-api.vercel.app/api/v1/health/storage" --max-time 15 || echo "000")
+            "${{ env.API_URL }}/api/v1/health/storage" --max-time 15 || echo "000")
           echo "Storage health status: $STATUS"
           [ "$STATUS" = "200" ] && echo "✅ Supabase Storage OK" || echo "⚠️ Storage check: $STATUS"
 

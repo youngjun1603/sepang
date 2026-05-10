@@ -405,6 +405,66 @@ async def mark_settlement_paid(
     return {"success": True}
 
 
+@router.get("/marketing")
+async def get_marketing_stats(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    r = (await db.execute(text("""
+        SELECT
+            (SELECT COUNT(*) FROM users WHERE role = 'CUSTOMER')                                         AS total_customers,
+            (SELECT COUNT(*) FROM users WHERE role = 'CUSTOMER' AND created_at::date = CURRENT_DATE)     AS new_today,
+            (SELECT COUNT(*) FROM users WHERE role = 'CUSTOMER' AND created_at >= NOW() - INTERVAL '7 days') AS new_week,
+            (SELECT COUNT(*) FROM users WHERE role = 'CUSTOMER' AND fcm_token IS NOT NULL)               AS fcm_opt_in,
+            (SELECT COALESCE(SUM(amount) FILTER (WHERE amount > 0), 0) FROM point_transactions)         AS points_issued,
+            (SELECT COALESCE(SUM(ABS(amount)) FILTER (WHERE amount < 0), 0) FROM point_transactions)    AS points_redeemed
+    """))).fetchone()
+
+    coupon_rows = await db.execute(text("""
+        SELECT c.code, c.name,
+               COUNT(uc.id) FILTER (WHERE uc.used_at IS NOT NULL) AS used_count,
+               COUNT(uc.id) AS issued_count
+        FROM coupons c
+        LEFT JOIN user_coupons uc ON uc.coupon_id = c.id
+        GROUP BY c.id, c.code, c.name
+        ORDER BY used_count DESC
+    """))
+    coupons = [
+        {"code": row.code, "name": row.name, "used_count": int(row.used_count), "issued_count": int(row.issued_count)}
+        for row in coupon_rows.fetchall()
+    ]
+
+    d3_target = (await db.execute(text("""
+        SELECT COUNT(*) FROM users u
+        WHERE u.role = 'CUSTOMER'
+          AND u.fcm_token IS NOT NULL
+          AND u.created_at <= NOW() - INTERVAL '3 days'
+          AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = u.id)
+    """))).scalar() or 0
+
+    night_target = (await db.execute(text("""
+        SELECT COUNT(DISTINCT u.id) FROM users u
+        JOIN orders o ON o.customer_id = u.id
+        WHERE u.role = 'CUSTOMER'
+          AND u.fcm_token IS NOT NULL
+          AND o.service_type = 'NIGHT'
+    """))).scalar() or 0
+
+    await _audit(db, request, current_user, "마케팅 현황 조회")
+    return {
+        "total_customers": int(r.total_customers or 0),
+        "new_today":       int(r.new_today or 0),
+        "new_week":        int(r.new_week or 0),
+        "fcm_opt_in":      int(r.fcm_opt_in or 0),
+        "points_issued":   int(r.points_issued or 0),
+        "points_redeemed": int(r.points_redeemed or 0),
+        "coupons":         coupons,
+        "d3_target":       int(d3_target),
+        "night_target":    int(night_target),
+    }
+
+
 @router.get("/audit-logs", response_model=list[AuditLog])
 async def get_audit_logs(
     request: Request,
