@@ -422,6 +422,21 @@ function ShopsPage() {
   const [form, setForm] = useState(EMPTY_SHOP);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [shopToast, setShopToast] = useState(null);
+
+  const handleToggleActive = async (shop) => {
+    const next = !shop.is_active;
+    const label = next ? "활성화" : "비활성화";
+    if (!window.confirm(`'${shop.name}'을 ${label}하시겠습니까?`)) return;
+    try {
+      await adminApi.updateShopActive(shop.id, next);
+      setShopToast(`'${shop.name}' ${label} 완료`);
+      setTimeout(() => setShopToast(null), 2500);
+      reload();
+    } catch (e) {
+      alert(e.message || "변경에 실패했습니다");
+    }
+  };
 
   const totals = shops ? {
     total: shops.length,
@@ -460,13 +475,14 @@ function ShopsPage() {
           <div key={i} className={`kpi ${k.c}`}><div className="kpi-lbl">{k.l}</div><div className="kpi-val" style={{fontSize:20}}>{k.v}</div><div className="kpi-icon">{k.i}</div></div>
         ))}
       </div>
+      {shopToast && <div style={{position:"fixed",top:20,right:20,background:"#1a1a1a",color:"white",padding:"10px 18px",borderRadius:10,fontSize:13,zIndex:9999}}>{shopToast}</div>}
       <div className="card">
         <div className="card-title">
           제휴 점포 현황
           <button className="btn btn-primary" onClick={() => { setForm(EMPTY_SHOP); setFormError(""); setShowForm(true); }}>+ 점포 등록</button>
         </div>
         {loading ? <Spinner/> : error ? <ErrorBox msg={error}/> :
-          <table className="tbl"><thead><tr><th>점포명</th><th>지역</th><th>팀</th><th>오늘</th><th>평점</th><th>상태</th></tr></thead>
+          <table className="tbl"><thead><tr><th>점포명</th><th>지역</th><th>팀</th><th>오늘</th><th>평점</th><th>상태</th><th></th></tr></thead>
           <tbody>{(shops??[]).map((s,i)=>(
             <tr key={i}>
               <td style={{fontWeight:600}}>{s.name}</td>
@@ -475,6 +491,12 @@ function ShopsPage() {
               <td style={{fontFamily:"'Syne',sans-serif",fontWeight:700}}>{s.today_orders}건</td>
               <td>⭐ {s.rating?.toFixed(1)}</td>
               <td><span className={`badge ${s.is_active?"ab-green":"ab-gray"}`}>{s.is_active?"운영중":"휴식"}</span></td>
+              <td>
+                <button onClick={()=>handleToggleActive(s)}
+                  style={{background:s.is_active?"#FFF3E0":"#E8F5E9",border:"none",borderRadius:6,padding:"3px 9px",fontSize:10,fontWeight:700,color:s.is_active?"#E65100":"#2E7D32",cursor:"pointer",whiteSpace:"nowrap"}}>
+                  {s.is_active?"비활성화":"활성화"}
+                </button>
+              </td>
             </tr>
           ))}</tbody></table>
         }

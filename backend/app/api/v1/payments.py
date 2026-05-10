@@ -78,18 +78,18 @@ async def prepare_payment(
     if order.payment_status == "PAID":
         raise HTTPException(400, "이미 결제 완료된 주문입니다")
 
-    category_names = {
-        "CLOTHES_30L": "세탁물 30L",
-        "CLOTHES_50L": "세탁물 50L",
-        "BLANKET":     "이불",
-        "SHOES":       "신발",
-    }
+    label_row = await db.execute(
+        text("SELECT label FROM wash_items WHERE key = :key LIMIT 1"),
+        {"key": order.wash_category},
+    )
+    label_rec = label_row.fetchone()
+    label = label_rec.label if label_rec else "세탁 서비스"
 
     return PrepareResponse(
         client_key=settings.TOSS_CLIENT_KEY,
         order_id=str(order.id),
         amount=order.total_amount,
-        order_name=f"세팡 {category_names.get(order.wash_category, '세탁 서비스')}",
+        order_name=f"세팡 {label}",
     )
 
 

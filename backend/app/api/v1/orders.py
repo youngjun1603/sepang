@@ -176,6 +176,39 @@ async def _do_cancel_order(db: AsyncSession, order, reason: str) -> None:
 
     await db.commit()
 
+    # 취소 알림: 고객 + 점주 (담당 점포가 있을 때)
+    notif_rows = await db.execute(
+        text("""
+            SELECT
+                cu.fcm_token AS customer_fcm,
+                cu.id::text  AS customer_id,
+                pu.fcm_token AS partner_fcm,
+                pu.id::text  AS partner_id
+            FROM orders o
+            JOIN users cu ON cu.id = o.customer_id
+            LEFT JOIN shops  sh ON sh.id = o.shop_id
+            LEFT JOIN users pu ON pu.id = sh.owner_id
+            WHERE o.id = :oid
+        """),
+        {"oid": oid},
+    )
+    notif = notif_rows.fetchone()
+    if notif:
+        cancel_title = "주문 취소 ❌"
+        asyncio.create_task(
+            send_customer_status_notification(
+                notif.customer_id, notif.customer_fcm, str(oid),
+                cancel_title, "주문이 취소되었습니다.",
+            )
+        )
+        if notif.partner_fcm:
+            asyncio.create_task(
+                send_customer_status_notification(
+                    notif.partner_id, notif.partner_fcm, str(oid),
+                    "담당 주문 취소 ❌", f"담당 주문이 취소되었습니다. ({reason})",
+                )
+            )
+
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 

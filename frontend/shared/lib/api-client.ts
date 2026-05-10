@@ -226,6 +226,11 @@ export const adminApi = {
     apiFetch<{ success: boolean }>(`/api/v1/admin/orders/${id}/force-cancel`, {
       method: "POST", body: JSON.stringify({ reason }),
     }),
+
+  updateShopActive: (shopId: string, isActive: boolean) =>
+    apiFetch<{ success: boolean }>(`/api/v1/admin/shops/${shopId}/active`, {
+      method: "PATCH", body: JSON.stringify({ is_active: isActive }),
+    }),
 };
 
 // ── 리뷰 API ─────────────────────────────────────────────────────────────────

@@ -224,6 +224,10 @@ async def list_orders(
     return PaginatedOrders(items=items, total=total, page=page, pages=max(1, -(-total // page_size)))
 
 
+class ShopStatusUpdate(BaseModel):
+    is_active: bool
+
+
 class ForceCancelRequest(BaseModel):
     reason: str = Field(..., min_length=2, max_length=200)
 
@@ -254,6 +258,27 @@ async def force_cancel_order(
     await _do_cancel_order(db, order, f"[관리자 강제취소] {body.reason}")
     await _audit(db, request, current_user, f"주문 강제취소: {order_id} — {body.reason}")
     return {"success": True}
+
+
+@router.patch("/shops/{shop_id}/active")
+async def update_shop_active(
+    shop_id: UUID,
+    body:    ShopStatusUpdate,
+    request: Request,
+    db:      AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    """점포 활성화/비활성화 토글"""
+    result = await db.execute(
+        text("UPDATE shops SET is_active = :v WHERE id = :id RETURNING id, name"),
+        {"v": body.is_active, "id": shop_id},
+    )
+    row = result.fetchone()
+    if not row:
+        raise HTTPException(404, "점포를 찾을 수 없습니다")
+    await db.commit()
+    await _audit(db, request, current_user, f"점포 상태 변경: {row.name} → {'활성' if body.is_active else '비활성'}")
+    return {"success": True, "is_active": body.is_active}
 
 
 @router.get("/shops", response_model=list[AdminShop])
