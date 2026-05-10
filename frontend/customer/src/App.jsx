@@ -3,7 +3,7 @@
  * 인증: 휴대폰 OTP (NAVER SENS)
  * 배포: Next.js PWA / Capacitor
  */
-import { useState, useEffect, useCallback, createContext, useContext } from "react";
+import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
 import { authApi, orderApi, reviewApi, geocodeApi, pointsApi, paymentApi, tokenStore, createOrderTrackingSocket } from "@sepang/shared/lib/api-client";
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -319,55 +319,70 @@ function HomeScreen() {
   const { navigate } = useRouter();
   const [sel, setSel] = useState("DAY");
   const [catIdx, setCatIdx] = useState(0);
-  const [address, setAddress] = useState(user?.address || "");
-  const [coords, setCoords] = useState(null);      // { lat, lng, address }
+  const [addrMain, setAddrMain] = useState("");    // 카카오 팝업에서 선택한 도로명주소
+  const [addrDetail, setAddrDetail] = useState(""); // 세부주소 (동·호수·층)
+  const [coords, setCoords] = useState(null);       // { lat, lng, address }
   const [geocoding, setGeocoding] = useState(false);
-  const [geocodeError, setGeocodeError] = useState(null);
+  const [addrSearchOpen, setAddrSearchOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
+  const addrSearchEl = useRef(null);
 
-  // 주소 변경 시 coords 초기화
-  const handleAddressChange = (val) => {
-    setAddress(val);
-    setCoords(null);
-    setGeocodeError(null);
-  };
+  // 카카오 우편번호 서비스 스크립트 로드 (1회)
+  useEffect(() => {
+    if (window.daum?.Postcode) return;
+    const s = document.createElement("script");
+    s.src = "//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
+    document.head.appendChild(s);
+  }, []);
 
-  const handleGeocode = async () => {
-    if (!address.trim()) { setGeocodeError("주소를 입력해 주세요"); return; }
-    setGeocoding(true);
-    setGeocodeError(null);
-    try {
-      const result = await geocodeApi.search(address);
-      setCoords(result);
-      setAddress(result.address);
-    } catch (e) {
-      setGeocodeError(e.message || "주소를 찾을 수 없습니다");
-    } finally {
-      setGeocoding(false);
-    }
-  };
+  // 주소 검색 모달이 열릴 때 Daum Postcode embed
+  useEffect(() => {
+    if (!addrSearchOpen || !addrSearchEl.current) return;
+    const mount = () => {
+      new window.daum.Postcode({
+        oncomplete: async (data) => {
+          const road = data.roadAddress || data.jibunAddress;
+          setAddrMain(road);
+          setAddrDetail("");
+          setAddrSearchOpen(false);
+          setCoords(null);
+          setGeocoding(true);
+          try {
+            const r = await geocodeApi.search(road);
+            setCoords(r);
+          } catch { /* 주소 선택은 완료, 좌표만 못 얻은 경우 허용 */ }
+          finally { setGeocoding(false); }
+        },
+        width: "100%",
+        height: "100%",
+      }).embed(addrSearchEl.current, { autoClose: false });
+    };
+    if (window.daum?.Postcode) { mount(); return; }
+    const iv = setInterval(() => { if (window.daum?.Postcode) { clearInterval(iv); mount(); } }, 100);
+    return () => clearInterval(iv);
+  }, [addrSearchOpen]);
 
   const cat = WASH_CATS[catIdx];
+  const fullAddress = addrMain + (addrDetail ? " " + addrDetail : "");
 
   const handleOrder = async () => {
-    if (!address) { setError("수거 주소를 입력해 주세요"); return; }
-    if (!coords) { setError("주소 확인 버튼을 눌러 주소를 확인해 주세요"); return; }
+    if (!addrMain) { setError("주소 검색을 눌러 수거 주소를 선택해 주세요"); return; }
+    if (!coords) { setError("주소 위치를 확인 중입니다. 잠시 후 다시 시도해 주세요"); return; }
     setError(null);
     setLoading(true);
     try {
       const result = await orderApi.create({
         service_type:     sel,
         wash_category:    cat.key,
-        pickup_address:   coords.address,
+        pickup_address:   fullAddress,
         pickup_lat:       coords.lat,
         pickup_lng:       coords.lng,
-        delivery_address: coords.address,
+        delivery_address: fullAddress,
         delivery_lat:     coords.lat,
         delivery_lng:     coords.lng,
       });
-      // 주문 생성 후 결제 화면으로 이동
       navigate("/payment", { orderId: result.order_id, totalAmount: result.total_amount, deadlineAt: result.deadline_at });
     } catch (e) {
       setError(e.message || "주문 실패. 다시 시도해 주세요.");
@@ -394,18 +409,54 @@ function HomeScreen() {
 
           <div className="section">
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: "#444" }}>수거 주소</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input className="input" placeholder="수거할 주소를 입력하세요" style={{ flex: 1 }}
-                value={address} onChange={e => handleAddressChange(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleGeocode()} />
-              <button onClick={handleGeocode} disabled={geocoding || !address.trim()}
-                style={{ flexShrink: 0, padding: "0 14px", background: coords ? "var(--green)" : "var(--blue)", color: "white", borderRadius: 10, border: "none", fontWeight: 700, fontSize: 13, cursor: "pointer", opacity: geocoding ? .6 : 1 }}>
-                {geocoding ? "검색중" : coords ? "✓" : "확인"}
+
+            {/* 주소1 — 카카오 우편번호 검색 */}
+            <div style={{ display: "flex", gap: 8, marginBottom: addrMain ? 8 : 0 }}>
+              <input className="input" readOnly placeholder="주소 검색을 눌러 선택하세요"
+                value={addrMain} onClick={() => setAddrSearchOpen(true)}
+                style={{ flex: 1, cursor: "pointer", background: addrMain ? "#f0fdf4" : undefined,
+                  color: addrMain ? "#15803d" : undefined, fontWeight: addrMain ? 600 : 400 }} />
+              <button onClick={() => setAddrSearchOpen(true)}
+                style={{ flexShrink: 0, padding: "0 14px", background: "var(--blue)", color: "white",
+                  borderRadius: 10, border: "none", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                {addrMain ? "재검색" : "주소 검색"}
               </button>
             </div>
-            {geocodeError && <div className="error-msg">{geocodeError}</div>}
-            {coords && <div style={{ fontSize: 11, color: "var(--green)", marginTop: 4 }}>📍 {coords.address}</div>}
+
+            {/* 주소2 — 세부주소 (주소1 선택 후 표시) */}
+            {addrMain && (
+              <input className="input" placeholder="세부 주소 입력 (동·호수·층 등, 선택사항)"
+                value={addrDetail} onChange={e => setAddrDetail(e.target.value)} />
+            )}
+
+            {/* 위치 확인 상태 */}
+            {geocoding && (
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>📍 위치 확인 중...</div>
+            )}
+            {coords && !geocoding && (
+              <div style={{ fontSize: 11, color: "var(--green)", marginTop: 6, display: "flex", alignItems: "flex-start", gap: 4 }}>
+                <span>📍</span>
+                <span>{fullAddress}</span>
+              </div>
+            )}
           </div>
+
+          {/* 카카오 주소검색 모달 */}
+          {addrSearchOpen && (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 9999,
+              display: "flex", flexDirection: "column" }}>
+              <div style={{ background: "white", padding: "14px 18px",
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
+                <span style={{ fontWeight: 700, fontSize: 16 }}>주소 검색</span>
+                <button onClick={() => setAddrSearchOpen(false)}
+                  style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#555", lineHeight: 1 }}>
+                  ✕
+                </button>
+              </div>
+              <div ref={addrSearchEl} style={{ flex: 1, background: "white" }} />
+            </div>
+          )}
 
           <div className="section" style={{ paddingTop: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: "#444" }}>서비스 선택</div>
