@@ -35,7 +35,6 @@ jobs:
 
       - name: Run Alembic migrations
         working-directory: backend
-        continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.SUPABASE_DIRECT_URL }}
           ENVIRONMENT: development

@@ -58,7 +58,7 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
-  # ── SLA 위반 주문 감시 (5분마다) ─────────────────────────
+  # ── SLA 위반 주문 감시 (10분마다) ────────────────────────
   sla-monitor:
     name: "SLA violation monitor"
     runs-on: ubuntu-latest
