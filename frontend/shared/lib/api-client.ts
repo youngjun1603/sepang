@@ -257,6 +257,29 @@ export const pointsApi = {
     apiFetch<{ coupons: Coupon[]; count: number }>("/api/v1/users/me/coupons"),
 };
 
+// ── 세탁 품목 API ─────────────────────────────────────────────────────────────
+
+export const washItemsApi = {
+  list: () =>
+    apiFetch<WashItem[]>("/api/v1/wash-items/", { skipAuth: true }),
+
+  listAll: () =>
+    apiFetch<WashItem[]>("/api/v1/wash-items/all"),
+
+  create: (data: Omit<WashItem, "id" | "is_active" | "created_at">) =>
+    apiFetch<WashItem>("/api/v1/wash-items/", {
+      method: "POST", body: JSON.stringify(data),
+    }),
+
+  update: (id: string, data: Partial<Omit<WashItem, "id" | "created_at">>) =>
+    apiFetch<{ success: boolean }>(`/api/v1/wash-items/${id}`, {
+      method: "PATCH", body: JSON.stringify(data),
+    }),
+
+  remove: (id: string) =>
+    apiFetch<{ success: boolean }>(`/api/v1/wash-items/${id}`, { method: "DELETE" }),
+};
+
 // ── 결제 API (토스페이먼츠) ────────────────────────────────────────────────────
 
 export const paymentApi = {
@@ -385,6 +408,12 @@ export interface Coupon {
   id: string; name: string; code: string;
   discount_amount?: number; discount_rate?: number;
   min_order_amount: number; expires_at?: string;
+}
+
+export interface WashItem {
+  id: string; key: string; label: string; icon: string;
+  base_price: number; sort_order: number;
+  is_active?: boolean; created_at?: string;
 }
 
 export interface CouponStat {

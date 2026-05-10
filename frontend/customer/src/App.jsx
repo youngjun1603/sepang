@@ -4,7 +4,7 @@
  * 배포: Next.js PWA / Capacitor
  */
 import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
-import { authApi, orderApi, reviewApi, geocodeApi, pointsApi, paymentApi, tokenStore, createOrderTrackingSocket } from "@sepang/shared/lib/api-client";
+import { authApi, orderApi, reviewApi, geocodeApi, pointsApi, paymentApi, washItemsApi, tokenStore, createOrderTrackingSocket } from "@sepang/shared/lib/api-client";
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 const RouterCtx = createContext({});
@@ -307,16 +307,35 @@ function LoginScreen() {
   );
 }
 
-const WASH_CATS = [
+const WASH_CATS_FALLBACK = [
   { key: "CLOTHES_30L", icon: "🧺", label: "생활빨래 30L", price: 13000 },
   { key: "CLOTHES_50L", icon: "🧺", label: "생활빨래 50L", price: 18000 },
   { key: "BLANKET",     icon: "🛏",  label: "이불",         price: 16000 },
   { key: "SHOES",       icon: "👟", label: "운동화",       price: 10000 },
 ];
 
+const WashItemsCtx = createContext({ washItems: WASH_CATS_FALLBACK, washItemMap: {} });
+const useWashItems = () => useContext(WashItemsCtx);
+
+function WashItemsProvider({ children }) {
+  const [washItems, setWashItems] = useState(WASH_CATS_FALLBACK);
+  useEffect(() => {
+    washItemsApi.list()
+      .then(items => {
+        if (items?.length) {
+          setWashItems(items.map(it => ({ key: it.key, icon: it.icon, label: it.label, price: it.base_price })));
+        }
+      })
+      .catch(() => {});
+  }, []);
+  const washItemMap = Object.fromEntries(washItems.map(it => [it.key, it]));
+  return <WashItemsCtx.Provider value={{ washItems, washItemMap }}>{children}</WashItemsCtx.Provider>;
+}
+
 function HomeScreen() {
   const { user } = useAuth();
   const { navigate } = useRouter();
+  const { washItems } = useWashItems();
   const [sel, setSel] = useState("DAY");
   const [catIdx, setCatIdx] = useState(0);
   const [addrMain, setAddrMain] = useState("");    // 카카오 팝업에서 선택한 도로명주소
@@ -381,7 +400,7 @@ function HomeScreen() {
   // 세탁물 종류 변경 시 쿠폰 초기화
   useEffect(() => { setSelectedCouponId(null); }, [catIdx]);
 
-  const cat = WASH_CATS[catIdx];
+  const cat = washItems[catIdx] || washItems[0];
   const fullAddress = addrMain + (addrDetail ? " " + addrDetail : "");
 
   // 할인 계산
@@ -512,7 +531,7 @@ function HomeScreen() {
             <div className="card">
               <div className="card-title">세탁물 종류</div>
               <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-                {WASH_CATS.map((c, i) => (
+                {washItems.map((c, i) => (
                   <div key={i} onClick={() => setCatIdx(i)} style={{
                     flex: "1 1 40%", background: catIdx === i ? "var(--blue-light)" : "var(--surface)",
                     borderRadius: 10, padding: "10px 6px", textAlign: "center", fontSize: 11, fontWeight: 600,
@@ -1093,8 +1112,6 @@ function PaymentScreen() {
     }
   };
 
-  const categoryLabels = { CLOTHES_30L: "세탁물 30L", CLOTHES_50L: "세탁물 50L", BLANKET: "이불", SHOES: "신발" };
-
   if (loading) return (
     <><style>{CSS}</style>
       <div className="app-root" style={{ justifyContent: "center", alignItems: "center" }}>
@@ -1438,9 +1455,11 @@ function RouteSwitch() {
 export default function CustomerApp() {
   return (
     <Router>
-      <AuthProvider>
-        <RouteSwitch />
-      </AuthProvider>
+      <WashItemsProvider>
+        <AuthProvider>
+          <RouteSwitch />
+        </AuthProvider>
+      </WashItemsProvider>
     </Router>
   );
 }

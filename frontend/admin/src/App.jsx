@@ -6,7 +6,7 @@
  * ╚══════════════════════════════════════════════════════════╝
  */
 import { useState, useEffect, createContext, useContext, useCallback } from "react";
-import { adminApi, authApi, tokenStore } from "@sepang/shared/lib/api-client";
+import { adminApi, authApi, washItemsApi, tokenStore } from "@sepang/shared/lib/api-client";
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 const RouterCtx = createContext({});
@@ -140,7 +140,7 @@ const CSS = `
 `;
 
 const NAV = [
-  {group:"운영",items:[{to:"/dashboard",ico:"📊",label:"대시보드"},{to:"/orders",ico:"📦",label:"주문 관제",badge:"sla"},{to:"/shops",ico:"🏪",label:"점포 관리"}]},
+  {group:"운영",items:[{to:"/dashboard",ico:"📊",label:"대시보드"},{to:"/orders",ico:"📦",label:"주문 관제",badge:"sla"},{to:"/shops",ico:"🏪",label:"점포 관리"},{to:"/wash-items",ico:"🧺",label:"품목 관리"}]},
   {group:"재무",items:[{to:"/settlements",ico:"💳",label:"정산 관리"}]},
   {group:"마케팅",items:[{to:"/marketing",ico:"📣",label:"마케팅/CRM"},{to:"/analytics",ico:"📈",label:"분석"}]},
   {group:"시스템",items:[{to:"/settings",ico:"⚙️",label:"설정"},{to:"/logs",ico:"📋",label:"접근 로그"}]},
@@ -886,6 +886,136 @@ function SettingsPage() {
   );
 }
 
+// ─── 품목 관리 ────────────────────────────────────────────────────────────────
+const EMPTY_FORM = { key: "", label: "", icon: "🧺", base_price: "", sort_order: "0" };
+
+function WashItemsPage() {
+  const { data: items, loading, error, reload } = useApi(() => washItemsApi.listAll());
+  const [modal, setModal] = useState(null); // null | { mode: "create" } | { mode: "edit", item }
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
+
+  const openCreate = () => { setForm(EMPTY_FORM); setModal({ mode: "create" }); };
+  const openEdit   = (item) => {
+    setForm({ key: item.key, label: item.label, icon: item.icon, base_price: String(item.base_price), sort_order: String(item.sort_order) });
+    setModal({ mode: "edit", item });
+  };
+
+  const handleSave = async () => {
+    if (!form.label || !form.base_price) { showToast("라벨과 가격은 필수입니다"); return; }
+    setSaving(true);
+    try {
+      if (modal.mode === "create") {
+        if (!form.key) { showToast("품목 키는 필수입니다 (대문자+숫자+밑줄)"); setSaving(false); return; }
+        await washItemsApi.create({ key: form.key, label: form.label, icon: form.icon || "🧺", base_price: Number(form.base_price), sort_order: Number(form.sort_order) || 0 });
+        showToast("품목이 추가되었습니다");
+      } else {
+        await washItemsApi.update(modal.item.id, { label: form.label, icon: form.icon, base_price: Number(form.base_price), sort_order: Number(form.sort_order) });
+        showToast("저장되었습니다");
+      }
+      setModal(null);
+      reload();
+    } catch (e) {
+      showToast(e.message || "오류가 발생했습니다");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleActive = async (item) => {
+    try {
+      if (item.is_active) {
+        await washItemsApi.remove(item.id);
+        showToast(`'${item.label}' 비활성화 완료`);
+      } else {
+        await washItemsApi.update(item.id, { is_active: true });
+        showToast(`'${item.label}' 활성화 완료`);
+      }
+      reload();
+    } catch (e) {
+      showToast(e.message || "오류");
+    }
+  };
+
+  return (
+    <Layout title="품목 관리"><style>{CSS}</style>
+      {toast && <div style={{position:"fixed",top:20,right:20,background:"#1a1a1a",color:"white",padding:"10px 18px",borderRadius:10,fontSize:13,zIndex:9999}}>{toast}</div>}
+      <div className="card" style={{marginBottom:20}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div className="card-title" style={{margin:0}}>세탁 품목 목록</div>
+          <button onClick={openCreate} style={{background:"#0057FF",color:"white",border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ 품목 추가</button>
+        </div>
+        {loading && <Spinner />}
+        {error && <ErrorBox msg={error} />}
+        {!loading && !error && (
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead>
+              <tr style={{borderBottom:"2px solid #F0F0F0"}}>
+                {["순서","아이콘","키","라벨","가격","상태",""].map((h,i)=>(
+                  <th key={i} style={{textAlign:"left",padding:"6px 8px",fontWeight:700,color:"#888",whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(items || []).map(item => (
+                <tr key={item.id} style={{borderBottom:"1px solid #F8F8F8",opacity:item.is_active?1:0.45}}>
+                  <td style={{padding:"9px 8px",color:"#aaa",fontSize:11}}>{item.sort_order}</td>
+                  <td style={{padding:"9px 8px",fontSize:18}}>{item.icon}</td>
+                  <td style={{padding:"9px 8px",fontFamily:"monospace",fontSize:11,color:"#555"}}>{item.key}</td>
+                  <td style={{padding:"9px 8px",fontWeight:600}}>{item.label}</td>
+                  <td style={{padding:"9px 8px",fontFamily:"'Syne',sans-serif",fontWeight:700}}>{Number(item.base_price).toLocaleString()}원</td>
+                  <td style={{padding:"9px 8px"}}>
+                    <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:20,background:item.is_active?"#E8F5E9":"#F5F5F5",color:item.is_active?"#2E7D32":"#999"}}>
+                      {item.is_active ? "활성" : "비활성"}
+                    </span>
+                  </td>
+                  <td style={{padding:"9px 8px",whiteSpace:"nowrap"}}>
+                    <button onClick={()=>openEdit(item)} style={{background:"#F6F7FB",border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",marginRight:4}}>수정</button>
+                    <button onClick={()=>toggleActive(item)} style={{background:item.is_active?"#FFF3E0":"#E8F5E9",border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",color:item.is_active?"#E65100":"#2E7D32"}}>
+                      {item.is_active?"비활성화":"활성화"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {modal && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
+          <div style={{background:"white",borderRadius:16,padding:24,width:360,maxWidth:"90vw"}}>
+            <div style={{fontSize:15,fontWeight:700,marginBottom:20}}>{modal.mode==="create"?"품목 추가":"품목 수정"}</div>
+            {modal.mode === "create" && (
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:11,color:"#888",marginBottom:4}}>품목 키 (대문자+숫자+밑줄, 예: SHIRT)</div>
+                <input value={form.key} onChange={e=>setForm(f=>({...f,key:e.target.value.toUpperCase()}))}
+                  style={{width:"100%",border:"1px solid #E0E0E0",borderRadius:8,padding:"8px 10px",fontSize:13,fontFamily:"monospace"}} placeholder="ITEM_KEY" />
+              </div>
+            )}
+            {[["라벨","label","text","품목 이름"],["아이콘","icon","text","🧺"],["가격 (원)","base_price","number","10000"],["정렬 순서","sort_order","number","0"]].map(([lbl,k,type,ph])=>(
+              <div key={k} style={{marginBottom:14}}>
+                <div style={{fontSize:11,color:"#888",marginBottom:4}}>{lbl}</div>
+                <input type={type} value={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}
+                  style={{width:"100%",border:"1px solid #E0E0E0",borderRadius:8,padding:"8px 10px",fontSize:13}} placeholder={ph} />
+              </div>
+            ))}
+            <div style={{display:"flex",gap:8,marginTop:8}}>
+              <button onClick={()=>setModal(null)} style={{flex:1,background:"#F6F7FB",border:"none",borderRadius:8,padding:"10px",fontSize:13,cursor:"pointer"}}>취소</button>
+              <button onClick={handleSave} disabled={saving} style={{flex:2,background:"#0057FF",color:"white",border:"none",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:saving?"not-allowed":"pointer"}}>
+                {saving?"저장 중...":(modal.mode==="create"?"추가":"저장")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Layout>
+  );
+}
+
 // ─── Route Switch & Root ──────────────────────────────────────────────────────
 function RouteSwitch() {
   const { path } = useRouter();
@@ -893,6 +1023,7 @@ function RouteSwitch() {
     "/login":LoginPage, "/dashboard":Dashboard, "/orders":OrdersPage,
     "/shops":ShopsPage, "/settlements":SettlementsPage, "/marketing":MarketingPage,
     "/analytics":AnalyticsPage, "/settings":SettingsPage, "/logs":LogsPage,
+    "/wash-items":WashItemsPage,
   };
   const C = map[path] || LoginPage;
   return <C/>;

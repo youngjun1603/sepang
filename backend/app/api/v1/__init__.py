@@ -7,6 +7,7 @@ from app.api.v1.settlements import router as settlements_router
 from app.api.v1.reviews     import router as reviews_router
 from app.api.v1.geocoding   import router as geocoding_router
 from app.api.v1.payments    import router as payments_router
+from app.api.v1.wash_items  import router as wash_items_router
 
 router = APIRouter()
 router.include_router(auth_router,        tags=["auth"])
@@ -17,6 +18,7 @@ router.include_router(users_router,       tags=["users"])
 router.include_router(settlements_router, tags=["settlements"])
 router.include_router(reviews_router,     tags=["reviews"])
 router.include_router(geocoding_router,   tags=["geocode"])
+router.include_router(wash_items_router,  tags=["wash-items"])
 
 @router.get("/health")
 async def health():
