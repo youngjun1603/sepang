@@ -165,3 +165,36 @@ async def _send_vapid_push(endpoint: str, p256dh: str, auth: str, payload: str) 
         )
     except Exception:
         pass
+
+
+async def send_customer_status_notification(
+    customer_id: str,
+    fcm_token: Optional[str],
+    order_id: str,
+    title: str,
+    body: str,
+) -> None:
+    """주문 상태 변경 시 고객에게 FCM + Web Push 알림 발송 (비동기 태스크용)"""
+    from sqlalchemy import text as sql_text
+    from app.core.database import AsyncSessionLocal
+
+    tasks = []
+    if fcm_token:
+        tasks.append(_send_fcm(
+            fcm_token, title, body,
+            data={"order_id": order_id, "type": "STATUS_CHANGE"},
+        ))
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            sql_text("SELECT endpoint, p256dh_key, auth_key FROM push_subscriptions WHERE user_id = :uid"),
+            {"uid": customer_id},
+        )
+        subs = result.fetchall()
+
+    payload = json.dumps({"title": title, "body": body, "order_id": order_id})
+    for sub in subs:
+        tasks.append(_send_vapid_push(sub.endpoint, sub.p256dh_key, sub.auth_key, payload))
+
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)

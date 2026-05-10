@@ -327,6 +327,10 @@ function HomeScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
+  const [coupons, setCoupons] = useState([]);
+  const [pointBalance, setPointBalance] = useState(0);
+  const [selectedCouponId, setSelectedCouponId] = useState(null);
+  const [usePoints, setUsePoints] = useState(false);
   const addrSearchEl = useRef(null);
 
   // 카카오 우편번호 서비스 스크립트 로드 (1회)
@@ -367,8 +371,27 @@ function HomeScreen() {
     return () => clearInterval(iv);
   }, [addrSearchOpen]);
 
+  // 쿠폰·포인트 로드
+  useEffect(() => {
+    if (!user) return;
+    pointsApi.coupons().then(r => setCoupons(r.coupons || [])).catch(() => {});
+    pointsApi.get().then(r => setPointBalance(r.balance || 0)).catch(() => {});
+  }, [user?.id]);
+
+  // 세탁물 종류 변경 시 쿠폰 초기화
+  useEffect(() => { setSelectedCouponId(null); }, [catIdx]);
+
   const cat = WASH_CATS[catIdx];
   const fullAddress = addrMain + (addrDetail ? " " + addrDetail : "");
+
+  // 할인 계산
+  const selectedCoupon = coupons.find(c => c.id === selectedCouponId) || null;
+  const couponDiscount = selectedCoupon
+    ? (selectedCoupon.discount_amount || Math.floor(cat.price * (selectedCoupon.discount_rate || 0) / 100))
+    : 0;
+  const afterCoupon = cat.price - couponDiscount;
+  const pointsUsable = (usePoints && pointBalance > 0) ? Math.min(pointBalance, afterCoupon) : 0;
+  const finalPrice = afterCoupon - pointsUsable;
 
   const handleOrder = async () => {
     if (!addrMain) { setError("주소 검색을 눌러 수거 주소를 선택해 주세요"); return; }
@@ -385,8 +408,15 @@ function HomeScreen() {
         delivery_address: fullAddress,
         delivery_lat:     coords.lat,
         delivery_lng:     coords.lng,
+        coupon_id:        selectedCouponId || undefined,
+        use_points:       usePoints && pointBalance > 0,
       });
-      navigate("/payment", { orderId: result.order_id, totalAmount: result.total_amount, deadlineAt: result.deadline_at });
+      // 포인트로 전액 결제된 경우 결제 화면 건너뜀
+      if (result.total_amount === 0) {
+        navigate("/tracking", { orderId: result.order_id });
+      } else {
+        navigate("/payment", { orderId: result.order_id, totalAmount: result.total_amount, deadlineAt: result.deadline_at });
+      }
     } catch (e) {
       setError(e.message || "주문 실패. 다시 시도해 주세요.");
     } finally {
@@ -493,19 +523,88 @@ function HomeScreen() {
                   </div>
                 ))}
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                <span style={{ color: "var(--muted)" }}>예상 금액</span>
-                <span style={{ fontFamily: "var(--font-d)", fontSize: 18, fontWeight: 800, color: "var(--blue)" }}>
-                  {cat.price.toLocaleString()}원
-                </span>
+              <div style={{ marginTop: 4 }}>
+                {(couponDiscount > 0 || pointsUsable > 0) && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                    <span>기본 금액</span><span>{cat.price.toLocaleString()}원</span>
+                  </div>
+                )}
+                {couponDiscount > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--green)", marginBottom: 4 }}>
+                    <span>쿠폰 할인</span><span>-{couponDiscount.toLocaleString()}원</span>
+                  </div>
+                )}
+                {pointsUsable > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--green)", marginBottom: 4 }}>
+                    <span>포인트 사용</span><span>-{pointsUsable.toLocaleString()}P</span>
+                  </div>
+                )}
+                <div style={{
+                  display: "flex", justifyContent: "space-between",
+                  borderTop: (couponDiscount > 0 || pointsUsable > 0) ? "1px dashed var(--border)" : "none",
+                  paddingTop: (couponDiscount > 0 || pointsUsable > 0) ? 8 : 0,
+                  marginTop: (couponDiscount > 0 || pointsUsable > 0) ? 4 : 0,
+                }}>
+                  <span style={{ color: "var(--muted)", fontSize: 13 }}>결제 금액</span>
+                  <span style={{ fontFamily: "var(--font-d)", fontSize: 18, fontWeight: 800, color: finalPrice === 0 ? "var(--green)" : "var(--blue)" }}>
+                    {finalPrice === 0 ? "🎉 무료" : `${finalPrice.toLocaleString()}원`}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
 
+          {/* 쿠폰 / 포인트 선택 */}
+          {(coupons.length > 0 || pointBalance > 0) && (
+            <div className="section" style={{ paddingTop: 0 }}>
+              <div className="card">
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>🎁 할인 혜택 적용</div>
+                {coupons.length > 0 && (
+                  <div style={{ marginBottom: pointBalance > 0 ? 12 : 0 }}>
+                    <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 6 }}>쿠폰 선택</div>
+                    <select
+                      value={selectedCouponId || ""}
+                      onChange={e => setSelectedCouponId(e.target.value || null)}
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid var(--border)", borderRadius: 10, fontSize: 13, fontFamily: "var(--font-b)", background: "white", outline: "none", cursor: "pointer" }}>
+                      <option value="">선택 안 함</option>
+                      {coupons.map(c => {
+                        const disabled = cat.price < (c.min_order_amount || 0);
+                        const discStr = c.discount_amount ? `-${c.discount_amount.toLocaleString()}원` : `-${c.discount_rate}%`;
+                        return (
+                          <option key={c.id} value={c.id} disabled={disabled}>
+                            {c.name} ({discStr}){disabled ? ` — 최소 ${(c.min_order_amount || 0).toLocaleString()}원` : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+                {pointBalance > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>포인트 사용</div>
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>보유 {pointBalance.toLocaleString()}P</div>
+                    </div>
+                    <button
+                      onClick={() => setUsePoints(u => !u)}
+                      style={{
+                        padding: "7px 18px", borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                        background: usePoints ? "var(--blue)" : "transparent",
+                        border: `1.5px solid ${usePoints ? "var(--blue)" : "var(--border)"}`,
+                        color: usePoints ? "white" : "#666", transition: "all .15s",
+                      }}>
+                      {usePoints ? `${pointsUsable.toLocaleString()}P 사용 중` : "사용 안 함"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {error && <div style={{ padding: "0 16px", color: "var(--red)", fontSize: 13 }}>{error}</div>}
           <div className="section" style={{ paddingTop: 0 }}>
             <button className="btn-primary" disabled={loading} onClick={handleOrder}>
-              {loading ? "주문 접수 중..." : "🚀 지금 바로 주문하기"}
+              {loading ? "주문 접수 중..." : finalPrice === 0 ? "🎉 무료로 주문하기" : "🚀 지금 바로 주문하기"}
             </button>
           </div>
 

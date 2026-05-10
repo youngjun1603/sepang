@@ -23,7 +23,7 @@ from app.core.database import get_db
 from app.core.auth import get_current_user, require_role
 from app.core.config import settings
 from app.models.order import Order, OrderStatus
-from app.services.notification import send_nearby_partner_notifications
+from app.services.notification import send_nearby_partner_notifications, send_customer_status_notification
 from app.services.geo import find_nearby_shops
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -46,6 +46,7 @@ class OrderCreateRequest(BaseModel):
     delivery_lat:       float
     delivery_lng:       float
     coupon_id:          Optional[UUID] = None
+    use_points:         bool           = False
     customer_note:      Optional[str]  = None
 
 
@@ -104,6 +105,15 @@ PARTNER_TRANSITIONS = {
 # 사진 필수 상태
 PHOTO_REQUIRED_STATUSES = {OrderStatus.PICKED_UP, OrderStatus.COMPLETED}
 
+# 상태 변경 시 고객 알림 메시지
+_CUSTOMER_NOTIFY = {
+    "ACCEPTED":   ("수락 완료 ✅", "점주가 주문을 수락했습니다. 잠시 후 수거 예정이에요 🧺"),
+    "PICKED_UP":  ("수거 완료 🧺", "세탁물을 수거했습니다. 열심히 세탁할게요!"),
+    "WASHING":    ("세탁 시작 🫧", "세탁이 시작됐습니다. 곧 깔끔해질 거예요!"),
+    "DELIVERING": ("배송 출발 🚗", "세탁 완료! 지금 배송 중이에요."),
+    "COMPLETED":  ("배송 완료 🎉", "세탁물이 도착했어요. 리뷰를 남겨주세요 ⭐"),
+}
+
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
@@ -121,7 +131,21 @@ async def create_order(
     """
     base_amount = PRICE_TABLE[req.wash_category]
     discount = await _apply_coupon(db, req.coupon_id, base_amount, current_user.id) if req.coupon_id else 0
-    total = base_amount - discount
+    after_coupon = base_amount - discount
+
+    # 포인트 사용
+    points_used = 0
+    point_balance = 0
+    if req.use_points:
+        pts = await db.execute(
+            text("SELECT COALESCE((SELECT balance FROM point_transactions WHERE user_id = :uid ORDER BY created_at DESC LIMIT 1), 0)"),
+            {"uid": current_user.id},
+        )
+        point_balance = pts.scalar() or 0
+        if point_balance > 0:
+            points_used = min(point_balance, after_coupon)
+
+    total = after_coupon - points_used
 
     result = await db.execute(
         text("""
@@ -135,7 +159,7 @@ async def create_order(
                 :customer_id, CAST(:service_type AS service_type), CAST(:wash_category AS wash_category),
                 :pickup_address,  ST_SetSRID(ST_MakePoint(:pickup_lng, :pickup_lat), 4326),
                 :delivery_address, ST_SetSRID(ST_MakePoint(:delivery_lng, :delivery_lat), 4326),
-                :base_amount, :discount, :total,
+                :base_amount, :total_discount, :total,
                 1000, :coupon_id, :note
             )
             RETURNING id, deadline_at
@@ -150,14 +174,30 @@ async def create_order(
             "delivery_address": req.delivery_address,
             "delivery_lat":   req.delivery_lat,
             "delivery_lng":   req.delivery_lng,
-            "base_amount":    base_amount,
-            "discount":       discount,
-            "total":          total,
+            "base_amount":      base_amount,
+            "total_discount":   discount + points_used,
+            "total":            total,
             "coupon_id":      req.coupon_id,
             "note":           req.customer_note,
         }
     )
     row = result.fetchone()
+
+    # 포인트 차감 트랜잭션 기록
+    if points_used > 0:
+        await db.execute(
+            text("""
+                INSERT INTO point_transactions (user_id, amount, balance, reason)
+                VALUES (:uid, :amount, :balance, :reason)
+            """),
+            {
+                "uid":    current_user.id,
+                "amount": -points_used,
+                "balance": point_balance - points_used,
+                "reason": "주문 시 포인트 사용",
+            },
+        )
+
     await db.commit()
 
     # 비동기로 주변 점주 알림 (응답 지연 없음)
@@ -186,10 +226,15 @@ async def update_order_status(
     - PENDING → ACCEPTED: 낙관적 잠금으로 동시 수락 방지
     - PICKED_UP / COMPLETED: 증빙 사진 필수 검증
     """
-    # 현재 주문 조회
+    # 현재 주문 조회 (customer 알림용 fcm_token 포함)
     result = await db.execute(
-        text("SELECT status, shop_id, version FROM orders WHERE id = :id FOR UPDATE"),
-        {"id": order_id}
+        text("""
+            SELECT o.status, o.shop_id, o.version, o.customer_id, u.fcm_token
+            FROM orders o
+            JOIN users u ON u.id = o.customer_id
+            WHERE o.id = :id FOR UPDATE
+        """),
+        {"id": order_id},
     )
     order = result.fetchone()
     if not order:
@@ -227,6 +272,11 @@ async def update_order_status(
         if not accepted.scalar():
             raise HTTPException(409, "이미 다른 점주가 수락한 주문입니다")
         await db.commit()
+        if "ACCEPTED" in _CUSTOMER_NOTIFY:
+            title, body = _CUSTOMER_NOTIFY["ACCEPTED"]
+            asyncio.create_task(
+                send_customer_status_notification(str(order.customer_id), order.fcm_token, str(order_id), title, body)
+            )
         return {"success": True, "status": req.new_status}
 
     # 일반 상태 전이
@@ -242,7 +292,13 @@ async def update_order_status(
     )
     await db.commit()
 
-    # Supabase Realtime이 orders 테이블 UPDATE를 구독자에게 자동 브로드캐스트
+    # 고객 알림 (FCM + Web Push) — Supabase Realtime과 별도로 발송
+    status_key = req.new_status.value
+    if status_key in _CUSTOMER_NOTIFY:
+        title, body = _CUSTOMER_NOTIFY[status_key]
+        asyncio.create_task(
+            send_customer_status_notification(str(order.customer_id), order.fcm_token, str(order_id), title, body)
+        )
 
     return {"success": True, "status": req.new_status}
 

@@ -361,7 +361,7 @@ export interface CreateOrderRequest {
   service_type: "DAY"|"NIGHT"; wash_category: string;
   pickup_address: string; pickup_lat: number; pickup_lng: number;
   delivery_address: string; delivery_lat: number; delivery_lng: number;
-  coupon_id?: string; customer_note?: string;
+  coupon_id?: string; use_points?: boolean; customer_note?: string;
 }
 
 export interface Review {
