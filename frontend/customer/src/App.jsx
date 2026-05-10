@@ -658,6 +658,7 @@ function TrackingScreen() {
   const [order, setOrder] = useState(null);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
   const cd = useCountdown(order?.deadline_at);
 
   useEffect(() => {
@@ -748,6 +749,24 @@ function TrackingScreen() {
               <button className="btn-primary" style={{ marginBottom: 16 }}
                 onClick={() => navigate("/review", { orderId: order.id })}>
                 ⭐ 리뷰 작성하기
+              </button>
+            )}
+            {["PENDING", "ACCEPTED"].includes(status || order.status) && (
+              <button
+                onClick={async () => {
+                  if (!window.confirm("주문을 취소하시겠습니까?\n(결제된 경우 자동 환불됩니다)")) return;
+                  setCancelling(true);
+                  try {
+                    await orderApi.cancel(order.id);
+                    navigate("/orders");
+                  } catch (e) {
+                    alert(e.message || "취소에 실패했습니다");
+                    setCancelling(false);
+                  }
+                }}
+                disabled={cancelling}
+                style={{ width: "100%", background: "var(--surface)", border: "1px solid var(--red)", borderRadius: 12, padding: 14, fontSize: 14, color: "var(--red)", cursor: "pointer", marginBottom: 16 }}>
+                {cancelling ? "취소 처리 중..." : "주문 취소"}
               </button>
             )}
           </div>

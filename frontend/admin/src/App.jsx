@@ -336,6 +336,8 @@ function Dashboard() {
   );
 }
 
+const NON_CANCELLABLE = new Set(["CANCELLED","COMPLETED"]);
+
 function OrdersPage() {
   const [tab,setTab]=useState(0);
   const statusMap = [undefined,"PENDING","COMPLETED","CANCELLED"];
@@ -343,9 +345,24 @@ function OrdersPage() {
     () => adminApi.orders({ status: statusMap[tab] }),
     [tab]
   );
+  const [cancelToast, setCancelToast] = useState(null);
+
+  const handleForceCancel = async (orderId) => {
+    const reason = window.prompt("강제 취소 사유를 입력하세요 (최소 2자):");
+    if (!reason || reason.trim().length < 2) return;
+    try {
+      await adminApi.forceCancelOrder(orderId, reason.trim());
+      setCancelToast("취소 완료");
+      setTimeout(() => setCancelToast(null), 2500);
+      reload();
+    } catch (e) {
+      alert(e.message || "취소에 실패했습니다");
+    }
+  };
 
   return (
     <Layout title="주문 관제"><style>{CSS}</style>
+      {cancelToast && <div style={{position:"fixed",top:20,right:20,background:"#1a1a1a",color:"white",padding:"10px 18px",borderRadius:10,fontSize:13,zIndex:9999}}>{cancelToast}</div>}
       <div className="card">
         <div className="card-title">전체 주문 <div style={{display:"flex",gap:6}}>
           <button className="btn btn-primary" onClick={()=>{
@@ -367,7 +384,7 @@ function OrdersPage() {
           ))}
         </div>
         {loading ? <Spinner/> : error ? <ErrorBox msg={error}/> :
-          <table className="tbl"><thead><tr><th>주문번호</th><th>고객</th><th>점포</th><th>타입</th><th>상태</th><th>잔여</th><th>금액</th></tr></thead>
+          <table className="tbl"><thead><tr><th>주문번호</th><th>고객</th><th>점포</th><th>타입</th><th>상태</th><th>잔여</th><th>금액</th><th></th></tr></thead>
           <tbody>{(data?.items ?? []).map((r,i)=>(
             <tr key={i}>
               <td style={{fontFamily:"monospace",fontSize:11,color:"#888"}}>{r.id?.slice(0,8)}</td>
@@ -377,6 +394,14 @@ function OrdersPage() {
               <td><StatusBadge s={r.status}/></td>
               <td><Timer hours_left={r.hours_left}/></td>
               <td style={{fontFamily:"'Syne',sans-serif",fontWeight:700}}>{r.total_amount?.toLocaleString()}원</td>
+              <td>
+                {!NON_CANCELLABLE.has(r.status) && (
+                  <button onClick={()=>handleForceCancel(r.id)}
+                    style={{background:"#FFF3E0",border:"none",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:700,color:"#E65100",cursor:"pointer",whiteSpace:"nowrap"}}>
+                    강제취소
+                  </button>
+                )}
+              </td>
             </tr>
           ))}</tbody></table>
         }

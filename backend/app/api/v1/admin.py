@@ -27,6 +27,7 @@ from app.core.database import get_db
 from app.core.auth import get_current_user, require_role
 from app.core.config import settings
 from app.services.geocoding import geocode_address
+from app.api.v1.orders import _do_cancel_order, ADMIN_NON_CANCELLABLE
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -221,6 +222,38 @@ async def list_orders(
 
     await _audit(db, request, current_user, "주문 목록 조회")
     return PaginatedOrders(items=items, total=total, page=page, pages=max(1, -(-total // page_size)))
+
+
+class ForceCancelRequest(BaseModel):
+    reason: str = Field(..., min_length=2, max_length=200)
+
+
+@router.post("/orders/{order_id}/force-cancel")
+async def force_cancel_order(
+    order_id: UUID,
+    body:     ForceCancelRequest,
+    request:  Request,
+    db:       AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    """관리자 강제 취소 — 어떤 진행 상태든 취소 가능 (완료·취소 제외)"""
+    result = await db.execute(
+        text("""
+            SELECT id, status::text, customer_id, coupon_id, points_used,
+                   payment_status::text, payment_key
+            FROM orders WHERE id = :id
+        """),
+        {"id": order_id},
+    )
+    order = result.fetchone()
+    if not order:
+        raise HTTPException(404, "주문을 찾을 수 없습니다")
+    if order.status in ADMIN_NON_CANCELLABLE:
+        raise HTTPException(400, f"이미 {order.status} 상태의 주문은 취소할 수 없습니다")
+
+    await _do_cancel_order(db, order, f"[관리자 강제취소] {body.reason}")
+    await _audit(db, request, current_user, f"주문 강제취소: {order_id} — {body.reason}")
+    return {"success": True}
 
 
 @router.get("/shops", response_model=list[AdminShop])

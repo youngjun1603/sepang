@@ -170,6 +170,9 @@ export const orderApi = {
 
   nearbyOrders: () =>
     apiFetch<NearbyOrder[]>("/api/v1/orders/partner/nearby"),
+
+  cancel: (id: string) =>
+    apiFetch<{ success: boolean }>(`/api/v1/orders/${id}/cancel`, { method: "POST" }),
 };
 
 // ── 정산 API ─────────────────────────────────────────────────────────────────
@@ -218,6 +221,11 @@ export const adminApi = {
 
   markSettlementPaid: (id: string) =>
     apiFetch<{ success: boolean }>(`/api/v1/admin/settlements/${id}/pay`, { method: "PATCH" }),
+
+  forceCancelOrder: (id: string, reason: string) =>
+    apiFetch<{ success: boolean }>(`/api/v1/admin/orders/${id}/force-cancel`, {
+      method: "POST", body: JSON.stringify({ reason }),
+    }),
 };
 
 // ── 리뷰 API ─────────────────────────────────────────────────────────────────
@@ -245,6 +253,17 @@ export const geocodeApi = {
 
   vapidPublicKey: () =>
     apiFetch<{ public_key: string }>("/api/v1/geocode/vapid-public-key", { skipAuth: true }),
+};
+
+// ── 점주 가용성 API ───────────────────────────────────────────────────────────
+
+export const availabilityApi = {
+  get: () =>
+    apiFetch<{ is_available: boolean }>("/api/v1/users/me/availability"),
+  set: (is_available: boolean) =>
+    apiFetch<{ is_available: boolean }>("/api/v1/users/me/availability", {
+      method: "PATCH", body: JSON.stringify({ is_available }),
+    }),
 };
 
 // ── 포인트 / 쿠폰 API ─────────────────────────────────────────────────────────

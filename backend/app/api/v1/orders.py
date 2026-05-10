@@ -1,17 +1,20 @@
 """
 주문 API — FastAPI
 ──────────────────
-POST   /api/v1/orders              주문 생성
-GET    /api/v1/orders/{id}         주문 상세
-PATCH  /api/v1/orders/{id}/status  상태 변경 (점주)
-GET    /api/v1/partner/nearby-orders  반경 내 주문 목록
-WS     /ws/orders/{id}            실시간 추적
+POST   /api/v1/orders                주문 생성
+POST   /api/v1/orders/{id}/cancel    주문 취소 (고객, PENDING/ACCEPTED만)
+GET    /api/v1/orders/{id}           주문 상세
+PATCH  /api/v1/orders/{id}/status    상태 변경 (점주)
+POST   /api/v1/orders/{id}/photos    사진 업로드
+GET    /api/v1/orders/partner/nearby 반경 내 주문 목록
 """
 from __future__ import annotations
+import base64
 from uuid import UUID
 from typing import Optional
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -33,15 +36,19 @@ STORAGE_BUCKET = "order-photos"
 def _get_supabase():
     return create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
 
+def _toss_headers() -> dict:
+    encoded = base64.b64encode(f"{settings.TOSS_SECRET_KEY}:".encode()).decode()
+    return {"Authorization": f"Basic {encoded}", "Content-Type": "application/json"}
+
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
 
 class OrderCreateRequest(BaseModel):
     service_type:       str   = Field(..., pattern="^(DAY|NIGHT)$")
-    wash_category:      str   = Field(..., pattern="^(CLOTHES_30L|CLOTHES_50L|BLANKET|SHOES)$")
+    wash_category:      str   = Field(..., min_length=2, max_length=50, pattern=r"^[A-Z0-9_]+$")
     pickup_address:     str   = Field(..., min_length=5)
-    pickup_lat:         float = Field(..., ge=33, le=43)    # 한국 위도 범위
-    pickup_lng:         float = Field(..., ge=124, le=132)  # 한국 경도 범위
+    pickup_lat:         float = Field(..., ge=33, le=43)
+    pickup_lng:         float = Field(..., ge=124, le=132)
     delivery_address:   str   = Field(..., min_length=5)
     delivery_lat:       float
     delivery_lng:       float
@@ -84,15 +91,7 @@ class OrderOut(BaseModel):
     customer_note:    Optional[str] = None
 
 
-# ── 가격표 ─────────────────────────────────────────────────────────────────────
-PRICE_TABLE = {
-    "CLOTHES_30L": 13000,
-    "CLOTHES_50L": 18000,
-    "BLANKET":     16000,
-    "SHOES":       10000,
-}
-
-# 상태 전이 허용 맵 (점주가 바꿀 수 있는 전이)
+# ── 상태 전이 허용 맵 (점주) ───────────────────────────────────────────────────
 PARTNER_TRANSITIONS = {
     OrderStatus.PENDING:    [OrderStatus.ACCEPTED],
     OrderStatus.ACCEPTED:   [OrderStatus.PICKED_UP],
@@ -102,38 +101,109 @@ PARTNER_TRANSITIONS = {
     OrderStatus.DELIVERING: [OrderStatus.COMPLETED],
 }
 
-# 사진 필수 상태
 PHOTO_REQUIRED_STATUSES = {OrderStatus.PICKED_UP, OrderStatus.COMPLETED}
 
-# 상태 변경 시 고객 알림 메시지
 _CUSTOMER_NOTIFY = {
     "ACCEPTED":   ("수락 완료 ✅", "점주가 주문을 수락했습니다. 잠시 후 수거 예정이에요 🧺"),
     "PICKED_UP":  ("수거 완료 🧺", "세탁물을 수거했습니다. 열심히 세탁할게요!"),
     "WASHING":    ("세탁 시작 🫧", "세탁이 시작됐습니다. 곧 깔끔해질 거예요!"),
     "DELIVERING": ("배송 출발 🚗", "세탁 완료! 지금 배송 중이에요."),
     "COMPLETED":  ("배송 완료 🎉", "세탁물이 도착했어요. 리뷰를 남겨주세요 ⭐"),
+    "CANCELLED":  ("주문 취소 ❌", "주문이 취소되었습니다."),
 }
+
+# 고객이 취소 가능한 상태 (수거 전)
+CUSTOMER_CANCELLABLE = {"PENDING", "ACCEPTED"}
+# 관리자도 취소 불가능한 최종 상태
+ADMIN_NON_CANCELLABLE = {"CANCELLED", "COMPLETED"}
+
+
+# ── 공통 취소 로직 ─────────────────────────────────────────────────────────────
+
+async def _do_cancel_order(db: AsyncSession, order, reason: str) -> None:
+    """주문 취소 + 쿠폰/포인트 복원 + Toss 환불 (결제 완료 시)"""
+    oid = order.id
+
+    await db.execute(
+        text("""
+            UPDATE orders
+            SET status = 'CANCELLED', cancelled_at = NOW(),
+                cancel_reason = :reason, updated_at = NOW()
+            WHERE id = :id
+        """),
+        {"reason": reason, "id": oid},
+    )
+
+    if order.coupon_id:
+        await db.execute(
+            text("UPDATE user_coupons SET used_at = NULL, order_id = NULL WHERE coupon_id = :cid AND user_id = :uid"),
+            {"cid": order.coupon_id, "uid": order.customer_id},
+        )
+
+    points_used = getattr(order, "points_used", 0) or 0
+    if points_used > 0:
+        bal_row = await db.execute(
+            text("SELECT COALESCE(balance, 0) FROM point_transactions WHERE user_id = :uid ORDER BY id DESC LIMIT 1"),
+            {"uid": order.customer_id},
+        )
+        cur_bal = (bal_row.fetchone() or (0,))[0]
+        await db.execute(
+            text("""
+                INSERT INTO point_transactions (user_id, amount, balance, reason, order_id)
+                VALUES (:uid, :amt, :bal, '주문 취소 포인트 환불', :oid)
+            """),
+            {"uid": order.customer_id, "amt": points_used, "bal": cur_bal + points_used, "oid": oid},
+        )
+
+    payment_status = getattr(order, "payment_status", None)
+    payment_key    = getattr(order, "payment_key", None)
+    if payment_status == "PAID" and payment_key and settings.TOSS_SECRET_KEY:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"https://api.tosspayments.com/v1/payments/{payment_key}/cancel",
+                headers=_toss_headers(),
+                json={"cancelReason": reason},
+            )
+        if resp.status_code == 200:
+            await db.execute(
+                text("UPDATE orders SET payment_status = 'REFUNDED' WHERE id = :id"),
+                {"id": oid},
+            )
+            await db.execute(
+                text("UPDATE payment_transactions SET status = 'REFUNDED', cancel_reason = :r, updated_at = NOW() WHERE order_id = :oid"),
+                {"r": reason, "oid": oid},
+            )
+
+    await db.commit()
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/", status_code=201)
 async def create_order(
-    req:        OrderCreateRequest,
-    db:         AsyncSession = Depends(get_db),
+    req:         OrderCreateRequest,
+    db:          AsyncSession = Depends(get_db),
     current_user = Depends(require_role("CUSTOMER")),
 ):
     """
     주문 생성
-    1. 가격 계산 (쿠폰 적용)
-    2. DB 저장 (deadline_at은 트리거가 자동 설정)
-    3. 주변 점주에게 FCM 푸시 전송 (비동기)
+    1. wash_items 테이블에서 가격 동적 조회
+    2. 쿠폰/포인트 적용
+    3. DB 저장 (deadline_at은 트리거 자동 설정)
+    4. 주변 점주 FCM 알림 (비동기)
     """
-    base_amount = PRICE_TABLE[req.wash_category]
+    price_row = await db.execute(
+        text("SELECT base_price FROM wash_items WHERE key = :key AND is_active = true"),
+        {"key": req.wash_category},
+    )
+    item = price_row.fetchone()
+    if not item:
+        raise HTTPException(400, f"유효하지 않은 세탁 품목입니다: {req.wash_category}")
+    base_amount = item.base_price
+
     discount = await _apply_coupon(db, req.coupon_id, base_amount, current_user.id) if req.coupon_id else 0
     after_coupon = base_amount - discount
 
-    # 포인트 사용
     points_used = 0
     point_balance = 0
     if req.use_points:
@@ -154,13 +224,13 @@ async def create_order(
                 pickup_address,  pickup_location,
                 delivery_address, delivery_location,
                 base_amount, discount_amount, total_amount,
-                platform_fee, coupon_id, customer_note
+                platform_fee, coupon_id, customer_note, points_used
             ) VALUES (
-                :customer_id, CAST(:service_type AS service_type), CAST(:wash_category AS wash_category),
+                :customer_id, CAST(:service_type AS service_type), :wash_category,
                 :pickup_address,  ST_SetSRID(ST_MakePoint(:pickup_lng, :pickup_lat), 4326),
                 :delivery_address, ST_SetSRID(ST_MakePoint(:delivery_lng, :delivery_lat), 4326),
                 :base_amount, :total_discount, :total,
-                1000, :coupon_id, :note
+                1000, :coupon_id, :note, :points_used
             )
             RETURNING id, deadline_at
         """),
@@ -174,33 +244,39 @@ async def create_order(
             "delivery_address": req.delivery_address,
             "delivery_lat":   req.delivery_lat,
             "delivery_lng":   req.delivery_lng,
-            "base_amount":      base_amount,
-            "total_discount":   discount + points_used,
-            "total":            total,
+            "base_amount":    base_amount,
+            "total_discount": discount + points_used,
+            "total":          total,
             "coupon_id":      req.coupon_id,
             "note":           req.customer_note,
+            "points_used":    points_used,
         }
     )
     row = result.fetchone()
 
-    # 포인트 차감 트랜잭션 기록
     if points_used > 0:
         await db.execute(
             text("""
-                INSERT INTO point_transactions (user_id, amount, balance, reason)
-                VALUES (:uid, :amount, :balance, :reason)
+                INSERT INTO point_transactions (user_id, amount, balance, reason, order_id)
+                VALUES (:uid, :amount, :balance, :reason, :oid)
             """),
             {
-                "uid":    current_user.id,
-                "amount": -points_used,
+                "uid":     current_user.id,
+                "amount":  -points_used,
                 "balance": point_balance - points_used,
-                "reason": "주문 시 포인트 사용",
+                "reason":  "주문 시 포인트 사용",
+                "oid":     row.id,
             },
+        )
+
+    if req.coupon_id:
+        await db.execute(
+            text("UPDATE user_coupons SET used_at = NOW(), order_id = :oid WHERE coupon_id = :cid AND user_id = :uid"),
+            {"oid": row.id, "cid": req.coupon_id, "uid": current_user.id},
         )
 
     await db.commit()
 
-    # 비동기로 주변 점주 알림 (응답 지연 없음)
     asyncio.create_task(
         send_nearby_partner_notifications(
             order_id=row.id,
@@ -212,6 +288,33 @@ async def create_order(
     )
 
     return {"order_id": row.id, "deadline_at": row.deadline_at, "total_amount": total}
+
+
+@router.post("/{order_id}/cancel")
+async def cancel_order(
+    order_id:    UUID,
+    db:          AsyncSession = Depends(get_db),
+    current_user = Depends(require_role("CUSTOMER")),
+):
+    """고객 주문 취소 — PENDING / ACCEPTED 상태만 가능"""
+    result = await db.execute(
+        text("""
+            SELECT id, status::text, customer_id, coupon_id, points_used,
+                   payment_status::text, payment_key
+            FROM orders WHERE id = :id
+        """),
+        {"id": order_id},
+    )
+    order = result.fetchone()
+    if not order:
+        raise HTTPException(404, "주문을 찾을 수 없습니다")
+    if str(order.customer_id) != str(current_user.id):
+        raise HTTPException(403, "본인 주문만 취소할 수 있습니다")
+    if order.status not in CUSTOMER_CANCELLABLE:
+        raise HTTPException(400, "수거 전(접수·수락) 주문만 취소할 수 있습니다")
+
+    await _do_cancel_order(db, order, "고객 취소")
+    return {"success": True}
 
 
 @router.patch("/{order_id}/status")
@@ -226,7 +329,6 @@ async def update_order_status(
     - PENDING → ACCEPTED: 낙관적 잠금으로 동시 수락 방지
     - PICKED_UP / COMPLETED: 증빙 사진 필수 검증
     """
-    # 현재 주문 조회 (customer 알림용 fcm_token 포함)
     result = await db.execute(
         text("""
             SELECT o.status, o.shop_id, o.version, o.customer_id, u.fcm_token
@@ -242,7 +344,6 @@ async def update_order_status(
 
     current_status = OrderStatus(order.status)
 
-    # ACCEPTED 요청인데 이미 PENDING이 아닌 경우 → 409 (다른 점주가 먼저 수락)
     if req.new_status == OrderStatus.ACCEPTED and current_status != OrderStatus.PENDING:
         raise HTTPException(409, "이미 다른 점주가 수락한 주문입니다")
 
@@ -250,7 +351,6 @@ async def update_order_status(
     if req.new_status not in allowed:
         raise HTTPException(400, f"'{current_status}' 상태에서 '{req.new_status}'로 변경할 수 없습니다")
 
-    # 사진 증빙 검증
     if req.new_status in PHOTO_REQUIRED_STATUSES:
         photo_type = "PICKUP" if req.new_status == OrderStatus.PICKED_UP else "DELIVERY"
         photo_check = await db.execute(
@@ -263,7 +363,6 @@ async def update_order_status(
                 f"{'수거' if photo_type == 'PICKUP' else '배송'} 증빙 사진을 먼저 업로드해 주세요"
             )
 
-    # ACCEPTED: 낙관적 잠금 수락 함수 사용
     if req.new_status == OrderStatus.ACCEPTED:
         accepted = await db.execute(
             text("SELECT accept_order(:oid, :shop_id, :ver)"),
@@ -279,7 +378,6 @@ async def update_order_status(
             )
         return {"success": True, "status": req.new_status}
 
-    # 일반 상태 전이
     ts_col = {
         OrderStatus.PICKED_UP:  "picked_up_at",
         OrderStatus.COMPLETED:  "completed_at",
@@ -292,7 +390,6 @@ async def update_order_status(
     )
     await db.commit()
 
-    # 고객 알림 (FCM + Web Push) — Supabase Realtime과 별도로 발송
     status_key = req.new_status.value
     if status_key in _CUSTOMER_NOTIFY:
         title, body = _CUSTOMER_NOTIFY[status_key]
@@ -311,16 +408,11 @@ async def upload_order_photo(
     db:         AsyncSession = Depends(get_db),
     current_user = Depends(require_role("PARTNER")),
 ):
-    """
-    S3 증빙 사진 업로드
-    - 파일 타입 검증 (JPEG/PNG만 허용)
-    - S3 업로드 후 DB에 메타데이터 저장
-    """
     allowed_types = {"image/jpeg", "image/png"}
     if file.content_type not in allowed_types:
         raise HTTPException(400, "JPEG 또는 PNG 파일만 업로드할 수 있습니다")
 
-    if file.size > 10 * 1024 * 1024:  # 10MB 제한
+    if file.size > 10 * 1024 * 1024:
         raise HTTPException(413, "파일 크기는 10MB 이하여야 합니다")
 
     ext = "jpg" if file.content_type == "image/jpeg" else "png"
@@ -328,7 +420,6 @@ async def upload_order_photo(
 
     content = await file.read()
 
-    # Supabase Storage 업로드 (동기 클라이언트를 스레드에서 실행)
     def _upload():
         sb = _get_supabase()
         sb.storage.from_(STORAGE_BUCKET).upload(
@@ -340,7 +431,6 @@ async def upload_order_photo(
 
     view_url = await asyncio.to_thread(_upload)
 
-    # DB 저장 (s3_key 컬럼에 storage_path, s3_bucket 컬럼에 버킷명 저장)
     await db.execute(
         text("""
             INSERT INTO order_photos (order_id, uploader_id, photo_type, s3_key, s3_bucket)
@@ -361,12 +451,9 @@ async def upload_order_photo(
 
 @router.get("/partner/nearby", response_model=list[NearbyOrderResponse])
 async def get_nearby_orders(
-    db:         AsyncSession = Depends(get_db),
+    db:          AsyncSession = Depends(get_db),
     current_user = Depends(require_role("PARTNER")),
 ):
-    """
-    점주 반경 내 대기 주문 목록 (PostGIS)
-    """
     result = await db.execute(
         text("SELECT * FROM get_nearby_orders(:shop_id, 3)"),
         {"shop_id": current_user.shop_id}
@@ -386,7 +473,6 @@ async def get_nearby_orders(
         )
         for r in rows
     ]
-
 
 
 @router.get("/", response_model=list[OrderOut])
@@ -477,4 +563,3 @@ async def _apply_coupon(db, coupon_id, base_amount, user_id) -> int:
     if coupon.discount_rate:
         return int(base_amount * coupon.discount_rate / 100)
     return 0
-

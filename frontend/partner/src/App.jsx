@@ -6,7 +6,7 @@
  * ╚══════════════════════════════════════════════════════════╝
  */
 import { useState, useEffect, createContext, useContext, useRef } from "react";
-import { authApi, orderApi, settlementApi, tokenStore } from "@sepang/shared/lib/api-client";
+import { authApi, orderApi, settlementApi, availabilityApi, tokenStore } from "@sepang/shared/lib/api-client";
 
 // ─── Web Push 구독 (로그인 후 호출) ───────────────────────────────────────────
 async function subscribePush() {
@@ -157,11 +157,45 @@ const CSS = `
 // ─── Shared Components ────────────────────────────────────────────────────────
 function TopBar() {
   const { partner } = useAuth();
+  const [isAvailable, setIsAvailable] = useState(true);
+  const [toggling, setToggling] = useState(false);
+
+  useEffect(() => {
+    availabilityApi.get()
+      .then(r => setIsAvailable(r.is_available))
+      .catch(() => {});
+  }, []);
+
+  const handleToggle = async () => {
+    setToggling(true);
+    try {
+      const next = !isAvailable;
+      await availabilityApi.set(next);
+      setIsAvailable(next);
+    } catch {
+      // 무시
+    } finally {
+      setToggling(false);
+    }
+  };
+
   return (
     <div className="topbar">
       <div><div className="t-logo">세<span>팡</span></div><div className="t-shop">{partner?.shopName||"-"}</div></div>
       <div style={{display:"flex",alignItems:"center",gap:8}}>
-        <div className="online-pill"><div className="online-dot"/>운영중</div>
+        <button
+          onClick={handleToggle}
+          disabled={toggling}
+          style={{
+            display:"flex",alignItems:"center",gap:5,
+            background: isAvailable ? "rgba(0,200,83,.15)" : "rgba(255,61,0,.12)",
+            border: `1.5px solid ${isAvailable ? "#00C853" : "#FF3D00"}`,
+            borderRadius:20, padding:"5px 10px", cursor:"pointer",
+            fontSize:11, fontWeight:700, color: isAvailable ? "#00C853" : "#FF3D00",
+          }}>
+          <span style={{width:7,height:7,borderRadius:"50%",background: isAvailable ? "#00C853" : "#FF3D00",display:"inline-block"}}/>
+          {toggling ? "변경중..." : isAvailable ? "영업중" : "영업종료"}
+        </button>
       </div>
     </div>
   );

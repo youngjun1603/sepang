@@ -16,7 +16,7 @@ from sqlalchemy import text
 from pydantic import BaseModel
 
 from app.core.database import get_db
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_role
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -24,6 +24,10 @@ router = APIRouter(prefix="/users", tags=["users"])
 class ProfileUpdate(BaseModel):
     name:    Optional[str] = None
     address: Optional[str] = None
+
+
+class AvailabilityUpdate(BaseModel):
+    is_available: bool
 
 
 class PushSubscription(BaseModel):
@@ -124,6 +128,37 @@ async def get_coupons(current_user=Depends(get_current_user), db: AsyncSession =
         for r in rows.fetchall()
     ]
     return {"coupons": coupons, "count": len(coupons)}
+
+
+@router.get("/me/availability")
+async def get_availability(
+    current_user=Depends(require_role("PARTNER")),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        text("SELECT is_available FROM shops WHERE owner_id = :uid"),
+        {"uid": current_user.id},
+    )
+    row = result.fetchone()
+    if not row:
+        raise HTTPException(404, "점포를 찾을 수 없습니다")
+    return {"is_available": row.is_available}
+
+
+@router.patch("/me/availability")
+async def set_availability(
+    req: AvailabilityUpdate,
+    current_user=Depends(require_role("PARTNER")),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        text("UPDATE shops SET is_available = :v WHERE owner_id = :uid RETURNING id"),
+        {"v": req.is_available, "uid": current_user.id},
+    )
+    if not result.fetchone():
+        raise HTTPException(404, "점포를 찾을 수 없습니다")
+    await db.commit()
+    return {"is_available": req.is_available}
 
 
 @router.patch("/me/fcm-token", status_code=200)
