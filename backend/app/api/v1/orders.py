@@ -26,7 +26,7 @@ from app.core.database import get_db
 from app.core.auth import get_current_user, require_role
 from app.core.config import settings
 from app.models.order import Order, OrderStatus
-from app.services.notification import send_nearby_partner_notifications, send_customer_status_notification
+from app.services.notification import send_nearby_partner_notifications, send_customer_status_notification, send_sms
 from app.services.geo import find_nearby_shops
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -116,6 +116,21 @@ _CUSTOMER_NOTIFY = {
 CUSTOMER_CANCELLABLE = {"PENDING", "ACCEPTED"}
 # 관리자도 취소 불가능한 최종 상태
 ADMIN_NON_CANCELLABLE = {"CANCELLED", "COMPLETED"}
+
+
+async def _sms_order_event(customer_id: str, message: str) -> None:
+    """주문 이벤트 SMS — SENS 설정 시에만 발송, 실패해도 무시"""
+    if not settings.NAVER_SENS_SERVICE_ID:
+        return
+    from app.core.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as _db:
+        row = await _db.execute(text("SELECT phone FROM users WHERE id = :id"), {"id": customer_id})
+        phone = row.scalar()
+        if phone:
+            try:
+                await send_sms(phone, message)
+            except Exception:
+                pass
 
 
 # ── 공통 취소 로직 ─────────────────────────────────────────────────────────────
@@ -208,6 +223,9 @@ async def _do_cancel_order(db: AsyncSession, order, reason: str) -> None:
                     "담당 주문 취소 ❌", f"담당 주문이 취소되었습니다. ({reason})",
                 )
             )
+        asyncio.create_task(
+            _sms_order_event(notif.customer_id, f"[세팡] 주문이 취소되었습니다. (#{str(oid)[-6:].upper()})")
+        )
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -319,6 +337,12 @@ async def create_order(
             total_amount=total,
         )
     )
+    asyncio.create_task(
+        _sms_order_event(
+            str(current_user.id),
+            f"[세팡] 주문이 접수되었습니다 (#{str(row.id)[-6:].upper()}). 수거 예정까지 대기해 주세요.",
+        )
+    )
 
     return {"order_id": row.id, "deadline_at": row.deadline_at, "total_amount": total}
 
@@ -409,6 +433,9 @@ async def update_order_status(
             asyncio.create_task(
                 send_customer_status_notification(str(order.customer_id), order.fcm_token, str(order_id), title, body)
             )
+        asyncio.create_task(
+            _sms_order_event(str(order.customer_id), f"[세팡] 점주가 주문을 수락했습니다. 곧 수거 예정이에요 (#{str(order_id)[-6:].upper()})")
+        )
         return {"success": True, "status": req.new_status}
 
     ts_col = {
@@ -428,6 +455,10 @@ async def update_order_status(
         title, body = _CUSTOMER_NOTIFY[status_key]
         asyncio.create_task(
             send_customer_status_notification(str(order.customer_id), order.fcm_token, str(order_id), title, body)
+        )
+    if status_key == "COMPLETED":
+        asyncio.create_task(
+            _sms_order_event(str(order.customer_id), f"[세팡] 세탁이 완료되어 배송되었습니다! 리뷰를 남겨주세요 ⭐ (#{str(order_id)[-6:].upper()})")
         )
 
     return {"success": True, "status": req.new_status}

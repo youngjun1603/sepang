@@ -10,7 +10,14 @@ import { authApi, orderApi, reviewApi, geocodeApi, pointsApi, paymentApi, washIt
 const RouterCtx = createContext({});
 const useRouter = () => useContext(RouterCtx);
 function Router({ children }) {
-  const [path, setPath] = useState(tokenStore.get() ? "/home" : "/login");
+  const [path, setPath] = useState(() => {
+    if (typeof window !== "undefined") {
+      const p = window.location.pathname;
+      if (p === "/payment/success") return "/payment/success";
+      if (p === "/payment/fail")    return "/payment/fail";
+    }
+    return tokenStore.get() ? "/home" : "/login";
+  });
   const [params, setParams] = useState({});
   const navigate = useCallback((to, p = {}) => { setPath(to); setParams(p); }, []);
   return (
