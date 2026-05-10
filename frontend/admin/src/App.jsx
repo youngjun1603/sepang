@@ -127,6 +127,16 @@ const CSS = `
   .spinner { display:inline-block; width:14px; height:14px; border:2px solid #E8E8E8; border-top-color:var(--blue); border-radius:50%; animation:spin .6s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .error-box { background:#FFF0ED; border:1px solid #FFCDD2; border-radius:9px; padding:9px 13px; font-size:12px; color:#C62828; margin-bottom:10px; }
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:200; display:flex; align-items:center; justify-content:center; }
+  .modal { background:white; border-radius:16px; padding:24px 28px; width:500px; max-width:96vw; max-height:90vh; overflow-y:auto; box-shadow:0 24px 64px rgba(0,0,0,.18); }
+  .modal-title { font-size:15px; font-weight:700; margin-bottom:18px; display:flex; align-items:center; justify-content:space-between; }
+  .form-row { margin-bottom:11px; }
+  .form-label { font-size:11px; color:#666; font-weight:600; margin-bottom:4px; display:block; }
+  .form-input { width:100%; padding:9px 11px; border:1.5px solid var(--border); border-radius:8px; font-size:12px; font-family:var(--font-b); outline:none; transition:border-color .15s; }
+  .form-input:focus { border-color:var(--blue); }
+  .form-select { width:100%; padding:9px 11px; border:1.5px solid var(--border); border-radius:8px; font-size:12px; font-family:var(--font-b); background:white; outline:none; }
+  .form-row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:11px; }
+  .form-section { font-size:10px; font-weight:700; color:#aaa; text-transform:uppercase; letter-spacing:1.2px; margin:16px 0 10px; padding-top:14px; border-top:1px solid var(--border); }
 `;
 
 const NAV = [
@@ -376,14 +386,47 @@ function OrdersPage() {
   );
 }
 
+const EMPTY_SHOP = {
+  name:"", address:"", owner_name:"", phone:"", business_number:"", password:"",
+  team_type:"DAY", radius_km:"3", bank_name:"", bank_account:"", bank_holder:"",
+};
+
 function ShopsPage() {
-  const { data: shops, loading, error } = useApi(() => adminApi.shops(), []);
+  const { data: shops, loading, error, reload } = useApi(() => adminApi.shops(), []);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(EMPTY_SHOP);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState("");
 
   const totals = shops ? {
     total: shops.length,
     day: shops.filter(s => s.team_type === "DAY").length,
     night: shops.filter(s => s.team_type === "NIGHT").length,
   } : {total:0,day:0,night:0};
+
+  function setField(k, v) { setForm(f => ({...f, [k]: v})); }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setFormError("");
+    setSubmitting(true);
+    try {
+      await adminApi.createShop({
+        ...form,
+        radius_km: parseFloat(form.radius_km) || 3,
+        bank_name:    form.bank_name    || undefined,
+        bank_account: form.bank_account || undefined,
+        bank_holder:  form.bank_holder  || undefined,
+      });
+      setShowForm(false);
+      setForm(EMPTY_SHOP);
+      reload();
+    } catch(e) {
+      setFormError(e.message || "등록에 실패했습니다");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <Layout title="점포 관리"><style>{CSS}</style>
@@ -393,7 +436,10 @@ function ShopsPage() {
         ))}
       </div>
       <div className="card">
-        <div className="card-title">제휴 점포 현황</div>
+        <div className="card-title">
+          제휴 점포 현황
+          <button className="btn btn-primary" onClick={() => { setForm(EMPTY_SHOP); setFormError(""); setShowForm(true); }}>+ 점포 등록</button>
+        </div>
         {loading ? <Spinner/> : error ? <ErrorBox msg={error}/> :
           <table className="tbl"><thead><tr><th>점포명</th><th>지역</th><th>팀</th><th>오늘</th><th>평점</th><th>상태</th></tr></thead>
           <tbody>{(shops??[]).map((s,i)=>(
@@ -408,6 +454,83 @@ function ShopsPage() {
           ))}</tbody></table>
         }
       </div>
+
+      {showForm && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowForm(false)}>
+          <div className="modal fu">
+            <div className="modal-title">
+              🏪 점포 등록
+              <button className="btn btn-ghost" onClick={() => setShowForm(false)} style={{fontSize:18,padding:"2px 8px",color:"#888"}}>✕</button>
+            </div>
+            {formError && <div className="error-box">{formError}</div>}
+            <form onSubmit={handleSubmit}>
+              <div className="form-row">
+                <label className="form-label">점포명 *</label>
+                <input className="form-input" placeholder="예: 세팡 강남점" value={form.name} onChange={e=>setField("name",e.target.value)} required/>
+              </div>
+              <div className="form-row">
+                <label className="form-label">주소 *</label>
+                <input className="form-input" placeholder="예: 서울특별시 강남구 테헤란로 123" value={form.address} onChange={e=>setField("address",e.target.value)} required/>
+              </div>
+              <div className="form-row2">
+                <div className="form-row" style={{marginBottom:0}}>
+                  <label className="form-label">대표자명 *</label>
+                  <input className="form-input" placeholder="홍길동" value={form.owner_name} onChange={e=>setField("owner_name",e.target.value)} required/>
+                </div>
+                <div className="form-row" style={{marginBottom:0}}>
+                  <label className="form-label">연락처 * (010XXXXXXXX)</label>
+                  <input className="form-input" placeholder="01012345678" value={form.phone} onChange={e=>setField("phone",e.target.value)} required pattern="^010\d{8}$"/>
+                </div>
+              </div>
+              <div className="form-row2">
+                <div className="form-row" style={{marginBottom:0}}>
+                  <label className="form-label">사업자번호 * (XXX-XX-XXXXX)</label>
+                  <input className="form-input" placeholder="123-45-67890" value={form.business_number} onChange={e=>setField("business_number",e.target.value)} required pattern="^\d{3}-\d{2}-\d{5}$"/>
+                </div>
+                <div className="form-row" style={{marginBottom:0}}>
+                  <label className="form-label">임시 비밀번호 * (8자 이상)</label>
+                  <input className="form-input" type="password" placeholder="••••••••" value={form.password} onChange={e=>setField("password",e.target.value)} required minLength={8}/>
+                </div>
+              </div>
+              <div className="form-row2">
+                <div className="form-row" style={{marginBottom:0}}>
+                  <label className="form-label">팀 유형 *</label>
+                  <select className="form-select" value={form.team_type} onChange={e=>setField("team_type",e.target.value)}>
+                    <option value="DAY">DAY (주간)</option>
+                    <option value="NIGHT">NIGHT (야간)</option>
+                    <option value="BOTH">BOTH (전체)</option>
+                  </select>
+                </div>
+                <div className="form-row" style={{marginBottom:0}}>
+                  <label className="form-label">서비스 반경 (km)</label>
+                  <input className="form-input" type="number" min="1" max="20" step="0.5" value={form.radius_km} onChange={e=>setField("radius_km",e.target.value)}/>
+                </div>
+              </div>
+              <div className="form-section">정산 계좌 (선택)</div>
+              <div className="form-row2">
+                <div className="form-row" style={{marginBottom:0}}>
+                  <label className="form-label">은행명</label>
+                  <input className="form-input" placeholder="예: 국민은행" value={form.bank_name} onChange={e=>setField("bank_name",e.target.value)}/>
+                </div>
+                <div className="form-row" style={{marginBottom:0}}>
+                  <label className="form-label">예금주</label>
+                  <input className="form-input" placeholder="홍길동" value={form.bank_holder} onChange={e=>setField("bank_holder",e.target.value)}/>
+                </div>
+              </div>
+              <div className="form-row">
+                <label className="form-label">계좌번호</label>
+                <input className="form-input" placeholder="000-000-000000" value={form.bank_account} onChange={e=>setField("bank_account",e.target.value)}/>
+              </div>
+              <div style={{display:"flex",gap:10,marginTop:18,justifyContent:"flex-end"}}>
+                <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)} disabled={submitting}>취소</button>
+                <button type="submit" className="btn btn-primary" disabled={submitting} style={{minWidth:90}}>
+                  {submitting ? <span className="spinner"/> : "점포 등록"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }

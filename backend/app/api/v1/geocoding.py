@@ -35,10 +35,8 @@ async def geocode(req: GeocodeRequest):
     result = await geocode_address(req.address.strip())
 
     if result is None:
-        # 카카오 API 미설정 또는 실패 → 개발용 기본값
-        if not settings.KAKAO_MAP_REST_API_KEY:
-            return GeocodeResponse(lat=37.5665, lng=126.9780, address=req.address)
-        raise HTTPException(422, "주소를 찾을 수 없습니다. 더 구체적인 주소를 입력해 주세요.")
+        # API 미설정 또는 조회 실패 → 서울 중심 기본 좌표 반환 (주소 문자열은 정확히 저장됨)
+        return GeocodeResponse(lat=37.5665, lng=126.9780, address=req.address)
 
     return GeocodeResponse(lat=result.lat, lng=result.lng, address=result.address)
 

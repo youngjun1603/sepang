@@ -188,11 +188,21 @@ export const adminApi = {
   dashboard: () =>
     apiFetch<DashboardKpi>("/api/v1/admin/dashboard"),
 
-  orders: (params?: { status?: string; page?: number }) =>
-    apiFetch<PaginatedResponse<Order>>("/api/v1/admin/orders?" + new URLSearchParams(params as any)),
+  orders: (params?: { status?: string; page?: number }) => {
+    const p: Record<string, string> = {};
+    if (params?.status != null) p.status = params.status;
+    if (params?.page   != null) p.page   = String(params.page);
+    const qs = new URLSearchParams(p).toString();
+    return apiFetch<PaginatedResponse<Order>>("/api/v1/admin/orders" + (qs ? "?" + qs : ""));
+  },
 
   shops: () =>
     apiFetch<Shop[]>("/api/v1/admin/shops"),
+
+  createShop: (data: CreateShopInput) =>
+    apiFetch<{ id: string; name: string; lat: number; lng: number }>("/api/v1/admin/shops", {
+      method: "POST", body: JSON.stringify(data),
+    }),
 
   slaAtRisk: () =>
     apiFetch<SlaOrder[]>("/api/v1/admin/sla-at-risk"),
@@ -328,6 +338,13 @@ export interface Settlement {
 export interface Shop {
   id: string; name: string; region: string; team_type: string;
   today_orders: number; rating: number; is_active: boolean; is_available: boolean;
+}
+
+export interface CreateShopInput {
+  name: string; address: string; owner_name: string;
+  phone: string; business_number: string; password: string;
+  team_type: "DAY" | "NIGHT" | "BOTH"; radius_km: number;
+  bank_name?: string; bank_account?: string; bank_holder?: string;
 }
 
 export interface DashboardKpi {

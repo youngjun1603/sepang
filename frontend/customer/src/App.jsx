@@ -352,8 +352,11 @@ function HomeScreen() {
           try {
             const r = await geocodeApi.search(road);
             setCoords(r);
-          } catch { /* 주소 선택은 완료, 좌표만 못 얻은 경우 허용 */ }
-          finally { setGeocoding(false); }
+          } catch {
+            // 좌표 변환 실패 → 주문은 계속 허용 (주소 문자열로 처리)
+            setCoords({ lat: 37.5665, lng: 126.9780, address: road });
+            setToast("주소가 선택되었습니다");
+          } finally { setGeocoding(false); }
         },
         width: "100%",
         height: "100%",
@@ -369,7 +372,7 @@ function HomeScreen() {
 
   const handleOrder = async () => {
     if (!addrMain) { setError("주소 검색을 눌러 수거 주소를 선택해 주세요"); return; }
-    if (!coords) { setError("주소 위치를 확인 중입니다. 잠시 후 다시 시도해 주세요"); return; }
+    if (geocoding) { setError("주소 위치를 확인 중입니다. 잠시 후 다시 시도해 주세요"); return; }
     setError(null);
     setLoading(true);
     try {

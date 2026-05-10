@@ -4,6 +4,7 @@
 GET  /api/v1/admin/dashboard     KPI 요약
 GET  /api/v1/admin/orders        주문 관제 (페이지네이션)
 GET  /api/v1/admin/shops         점포 현황
+POST /api/v1/admin/shops         점포 등록 (파트너 계정 동시 생성)
 GET  /api/v1/admin/sla-at-risk   SLA 위험 주문
 GET  /api/v1/admin/settlements   정산 내역
 GET  /api/v1/admin/audit-logs    접근 감사 로그
@@ -15,15 +16,17 @@ from typing import Optional
 from datetime import date
 from uuid import UUID
 
+import bcrypt
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.database import get_db
 from app.core.auth import get_current_user, require_role
 from app.core.config import settings
+from app.services.geocoding import geocode_address
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -118,6 +121,20 @@ class PaginatedOrders(BaseModel):
     total: int
     page: int
     pages: int
+
+
+class CreateShopRequest(BaseModel):
+    name:            str   = Field(..., min_length=2, max_length=100)
+    address:         str   = Field(..., min_length=5)
+    owner_name:      str   = Field(..., min_length=2, max_length=50)
+    phone:           str   = Field(..., pattern=r"^010\d{8}$")
+    business_number: str   = Field(..., pattern=r"^\d{3}-\d{2}-\d{5}$")
+    password:        str   = Field(..., min_length=8)
+    team_type:       str   = Field("DAY", pattern=r"^(DAY|NIGHT|BOTH)$")
+    radius_km:       float = Field(3.0, ge=1, le=20)
+    bank_name:       Optional[str] = None
+    bank_account:    Optional[str] = None
+    bank_holder:     Optional[str] = None
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -235,13 +252,93 @@ async def list_shops(
     ]
 
 
+@router.post("/shops", status_code=201)
+async def create_shop(
+    request: Request,
+    body: CreateShopRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    # 중복 사업자번호 확인
+    dup = await db.execute(
+        text("SELECT id FROM users WHERE business_number = :bn"),
+        {"bn": body.business_number},
+    )
+    if dup.fetchone():
+        raise HTTPException(409, f"이미 등록된 사업자번호입니다: {body.business_number}")
+
+    # 주소 → 좌표 (Kakao 미설정 시 서울 중심 fallback)
+    geo = await geocode_address(body.address)
+    lat = geo.lat if geo else 37.5665
+    lng = geo.lng if geo else 126.9780
+
+    pw_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
+
+    user_row = await db.execute(
+        text("""
+            INSERT INTO users (role, name, phone, business_number, password_hash)
+            VALUES ('PARTNER', :name, :phone, :bn, :pw)
+            RETURNING id
+        """),
+        {"name": body.owner_name, "phone": body.phone, "bn": body.business_number, "pw": pw_hash},
+    )
+    user_id = user_row.scalar()
+
+    shop_row = await db.execute(
+        text("""
+            INSERT INTO shops (
+                owner_id, name, address, location,
+                team_type, radius_km,
+                bank_name, bank_account, bank_holder
+            ) VALUES (
+                :owner_id, :name, :address,
+                ST_SetSRID(ST_MakePoint(:lng, :lat), 4326),
+                CAST(:team_type AS team_type), :radius,
+                :bank_name, :bank_account, :bank_holder
+            )
+            RETURNING id
+        """),
+        {
+            "owner_id": user_id,
+            "name": body.name,
+            "address": body.address,
+            "lat": lat, "lng": lng,
+            "team_type": body.team_type,
+            "radius": body.radius_km,
+            "bank_name": body.bank_name,
+            "bank_account": body.bank_account,
+            "bank_holder": body.bank_holder,
+        },
+    )
+    shop_id = shop_row.scalar()
+
+    await db.commit()
+    await _audit(db, request, current_user, f"점포 등록: {body.name} ({body.business_number})")
+    return {"id": str(shop_id), "name": body.name, "lat": lat, "lng": lng}
+
+
 @router.get("/sla-at-risk")
 async def get_sla_at_risk(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(_monitor_or_admin),
 ):
-    rows = await db.execute(text("SELECT * FROM vw_sla_at_risk ORDER BY hours_left"))
+    rows = await db.execute(text("""
+        SELECT
+            o.id::text          AS id,
+            u.name              AS customer_name,
+            u.phone             AS customer_phone,
+            s.name              AS shop_name,
+            o.status::text      AS status,
+            o.deadline_at::text AS deadline_at,
+            ROUND(EXTRACT(EPOCH FROM (o.deadline_at - NOW())) / 3600, 1) AS hours_left
+        FROM orders o
+        JOIN users u ON u.id = o.customer_id
+        LEFT JOIN shops s ON s.id = o.shop_id
+        WHERE o.status NOT IN ('COMPLETED', 'CANCELLED')
+          AND o.deadline_at < NOW() + INTERVAL '4 hours'
+        ORDER BY o.deadline_at
+    """))
     if getattr(current_user, "id", None) != "monitor":
         await _audit(db, request, current_user, "SLA 위험 주문 조회")
     return [dict(r._mapping) for r in rows.fetchall()]

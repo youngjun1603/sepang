@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>세팡 아이콘 PNG 변환</title>
+  <style>
+    body { font-family: sans-serif; background: #f0f0f0; display: flex; flex-direction: column; align-items: center; padding: 40px; gap: 20px; }
+    canvas { border-radius: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+    button { background: #0057FF; color: white; border: none; border-radius: 10px; padding: 14px 32px; font-size: 15px; font-weight: 700; cursor: pointer; }
+    button:hover { background: #003DC7; }
+    .sizes { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+    .size-btn { background: white; color: #0057FF; border: 2px solid #0057FF; border-radius: 8px; padding: 8px 18px; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .size-btn:hover { background: #EEF3FF; }
+    p { color: #666; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h2 style="color:#0057FF; margin:0">세팡 앱 아이콘</h2>
+  <p>미리보기 (512×512)</p>
+  <canvas id="c" width="512" height="512"></canvas>
+  <button onclick="download(512)">PNG 다운로드 (512×512) — 카카오 권장</button>
+  <div class="sizes">
+    <button class="size-btn" onclick="download(256)">256px</button>
+    <button class="size-btn" onclick="download(128)">128px</button>
+    <button class="size-btn" onclick="download(64)">64px</button>
+  </div>
+
+  <script>
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0057FF"/>
+      <stop offset="100%" style="stop-color:#003DC7"/>
+    </linearGradient>
+    <linearGradient id="drum" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.18"/>
+      <stop offset="100%" style="stop-color:#ffffff;stop-opacity:0.04"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" ry="112" fill="url(#bg)"/>
+  <rect x="108" y="110" width="296" height="292" rx="28" ry="28" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="10"/>
+  <rect x="108" y="110" width="296" height="72" rx="28" ry="28" fill="rgba(255,255,255,0.10)"/>
+  <rect x="108" y="154" width="296" height="28" fill="rgba(255,255,255,0.10)"/>
+  <circle cx="165" cy="146" r="10" fill="#FFD600"/>
+  <circle cx="200" cy="146" r="10" fill="rgba(255,255,255,0.3)"/>
+  <circle cx="235" cy="146" r="10" fill="rgba(255,255,255,0.15)"/>
+  <circle cx="256" cy="296" r="118" fill="url(#drum)" stroke="rgba(255,255,255,0.28)" stroke-width="9" filter="url(#shadow)"/>
+  <circle cx="256" cy="296" r="80" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.18)" stroke-width="5"/>
+  <rect x="249" y="222" width="14" height="40" rx="7" fill="rgba(255,255,255,0.55)" transform="rotate(0 256 296)"/>
+  <rect x="249" y="222" width="14" height="40" rx="7" fill="rgba(255,255,255,0.55)" transform="rotate(120 256 296)"/>
+  <rect x="249" y="222" width="14" height="40" rx="7" fill="rgba(255,255,255,0.55)" transform="rotate(240 256 296)"/>
+  <circle cx="256" cy="296" r="18" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.4)" stroke-width="4"/>
+  <circle cx="256" cy="296" r="6" fill="rgba(255,255,255,0.7)"/>
+  <text x="256" y="466" font-family="'Noto Sans KR','Apple SD Gothic Neo',sans-serif" font-size="68" font-weight="900" text-anchor="middle" letter-spacing="4" fill="white">세<tspan fill="#FFD600">팡</tspan></text>
+  <rect x="190" y="477" width="132" height="4" rx="2" fill="rgba(255,255,255,0.18)"/>
+</svg>`;
+
+    function renderToCanvas(canvas, size) {
+      const ctx = canvas.getContext('2d');
+      canvas.width = size;
+      canvas.height = size;
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => { ctx.drawImage(img, 0, 0, size, size); URL.revokeObjectURL(url); };
+      img.src = url;
+    }
+
+    renderToCanvas(document.getElementById('c'), 512);
+
+    function download(size) {
+      const c = document.createElement('canvas');
+      renderToCanvas(c, size);
+      setTimeout(() => {
+        const a = document.createElement('a');
+        a.download = `sepang_icon_${size}x${size}.png`;
+        a.href = c.toDataURL('image/png');
+        a.click();
+      }, 300);
+    }
+  </script>
+</body>
+</html>
