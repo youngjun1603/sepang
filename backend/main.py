@@ -47,8 +47,8 @@ app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
@@ -60,11 +60,10 @@ app.include_router(api_v1_router, prefix="/api/v1")
 async def global_exception_handler(request: Request, exc: Exception):
     """Vercel 서버리스에서 500 응답에도 CORS 헤더 포함되도록 전역 처리"""
     logger.exception("Unhandled exception: %s", exc)
-    origin = request.headers.get("origin", "")
-    headers = {}
-    if origin in settings.CORS_ORIGINS:
-        headers["Access-Control-Allow-Origin"] = origin
-        headers["Access-Control-Allow-Credentials"] = "true"
+    headers = {
+        "Access-Control-Allow-Origin":  "*",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Requested-With",
+    }
     return JSONResponse(
         status_code=500,
         content={"detail": "서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."},
