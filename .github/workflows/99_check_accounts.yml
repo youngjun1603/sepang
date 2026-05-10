@@ -1,0 +1,22 @@
+name: 99 Check Test Accounts (임시)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install psql
+        run: sudo apt-get install -y postgresql-client
+
+      - name: Show test accounts
+        env:
+          PGPASSWORD: "Sepang2026!"
+        run: |
+          psql "postgresql://postgres.apghgbecayjfsuswaggf@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres" <<SQL
+          SELECT u.role, u.name, u.phone, u.email, u.business_number, s.name AS shop_name
+          FROM users u
+          LEFT JOIN shops s ON s.owner_id = u.id
+          ORDER BY u.role;
+          SQL
