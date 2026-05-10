@@ -1,0 +1,22 @@
+name: 99 Get Current TOTP Code (임시)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  totp:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate current TOTP code
+        run: |
+          pip install pyotp -q
+          python3 -c "
+          import pyotp, time
+          secret = 'DX6ZO772WT72R2QL7JOXYUD76BJ35YBJ'
+          totp = pyotp.TOTP(secret)
+          now = totp.now()
+          remaining = 30 - (int(time.time()) % 30)
+          print(f'현재 OTP 코드: {now}')
+          print(f'남은 유효시간: {remaining}초')
+          print(f'다음 코드:     {totp.at(int(time.time()) + 30)}')
+          "
