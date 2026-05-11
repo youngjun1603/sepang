@@ -15,9 +15,9 @@ concurrency:
 env:
   NODE_VERSION: "20"
   # 도메인 연결 후 아래 3줄만 변경 (코드 수정 없이 URL 전환)
-  API_URL:      https://sepang-api.vercel.app      # 연결 후: https://api.sepang.kr
-  CUSTOMER_URL: https://sepang-customer.vercel.app  # 연결 후: https://sepang.kr
-  PARTNER_URL:  https://sepang-partner.vercel.app   # 연결 후: https://partner.sepang.kr
+  API_URL:      https://api.sepang.kr
+  CUSTOMER_URL: https://sepang.kr
+  PARTNER_URL:  https://partner.sepang.kr
 
 jobs:
   # ── DB 마이그레이션 (Alembic → Supabase PostgreSQL) ─────────────
