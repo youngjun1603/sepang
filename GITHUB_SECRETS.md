@@ -1,94 +1,120 @@
-# GitHub Secrets & Environment 설정 가이드
+# GitHub Secrets & 환경변수 설정 가이드
 
-## Required Secrets
+## GitHub Repository Secrets
 
-GitHub Repository → Settings → Secrets and variables → Actions
+GitHub → youngjun1603/sepang → Settings → Secrets and variables → Actions
 
-### AWS 인증 (OIDC — 장기 자격증명 없음)
+### Vercel 배포
 ```
-AWS_ACCOUNT_ID          AWS 계정 ID (12자리 숫자)
-```
-
-### 데이터베이스
-```
-DB_PASSWORD             RDS 마스터 비밀번호
-```
-
-### 인프라
-```
-PRIVATE_SUBNET_IDS      스테이징 프라이빗 서브넷 ID (콤마 구분)
-ECS_SECURITY_GROUP      스테이징 ECS 보안 그룹 ID
-PROD_PRIVATE_SUBNET_IDS 프로덕션 프라이빗 서브넷 ID
-PROD_ECS_SG             프로덕션 ECS 보안 그룹 ID
+VERCEL_TOKEN                  Vercel Personal Access Token
+VERCEL_ORG_ID                 team_JBhMZkd4FWWdIinWku39uvFQ
+VERCEL_PROJECT_ID_BACKEND     prj_2pECSbwJ4BMy4iM7R9mp2XI1XSSc
+VERCEL_PROJECT_ID_CUSTOMER    prj_q9hn6s3gExBIBH5xckqSgvKHVBWv
+VERCEL_PROJECT_ID_PARTNER     prj_Ynt1tle9JFSmwm3A1T3dLJwOAY6v
+VERCEL_PROJECT_ID_ADMIN       prj_q40A5Llde4FWxYnal6JHNVWO5Hj0
 ```
 
-### 알림
+### Supabase
 ```
-SLACK_WEBHOOK_URL       Slack Incoming Webhook URL
-```
-
-### 모니터링
-```
-MONITOR_API_TOKEN       /api/v1/admin/* 조회용 서비스 토큰
-BOT_TOKEN               GitHub Bot PAT (의존성 PR 생성용)
-```
-
-## GitHub Environments 설정
-
-### staging
-- Environment name: `staging`
-- URL: `https://staging.sepang.kr`
-- Protection rules: 없음 (자동 배포)
-
-### production
-- Environment name: `production`
-- URL: `https://sepang.kr`
-- Protection rules:
-  - Required reviewers: 운영팀 최소 1명
-  - Wait timer: 5분 (배포 전 냉각 시간)
-  - Allowed branches: main only
-
-## AWS IAM OIDC 설정
-
-```bash
-# GitHub OIDC Provider 등록
-aws iam create-open-id-connect-provider \
-  --url https://token.actions.githubusercontent.com \
-  --client-id-list sts.amazonaws.com \
-  --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
-
-# Staging 배포 Role
-aws iam create-role \
-  --role-name sepang-github-actions-staging \
-  --assume-role-policy-document '{
-    "Version":"2012-10-17",
-    "Statement":[{
-      "Effect":"Allow",
-      "Principal":{"Federated":"arn:aws:iam::ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"},
-      "Action":"sts:AssumeRoleWithWebIdentity",
-      "Condition":{
-        "StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com"},
-        "StringLike":{"token.actions.githubusercontent.com:sub":"repo:your-org/sepang:ref:refs/heads/develop"}
-      }
-    }]
-  }'
+SUPABASE_DIRECT_URL           postgresql+asyncpg://postgres:***@db.apghgbecayjfsuswaggf.supabase.co:5432/postgres
+                              (마이그레이션 전용 — Direct Connection)
+SUPABASE_PROJECT_REF          apghgbecayjfsuswaggf
+SUPABASE_ACCESS_TOKEN         Supabase Management API 토큰
+SUPABASE_URL                  https://apghgbecayjfsuswaggf.supabase.co
+SUPABASE_ANON_KEY             Supabase anon public key
 ```
 
-## 브랜치 전략 (Git Flow)
+### 모니터링·알림
+```
+MONITOR_API_TOKEN             SLA 감시용 정적 토큰 (Vercel sepang-api와 동일값)
+SLACK_WEBHOOK_URL             Slack Incoming Webhook (없어도 배포 계속됨)
+```
+
+---
+
+## Vercel 환경변수 — sepang-api
+
+Vercel 대시보드 → sepang-api → Settings → Environment Variables
+
+### 필수 (현재 미설정 — 서비스 불가)
+```
+TOSS_CLIENT_KEY               토스페이먼츠 클라이언트 키 (live_ck_... 또는 test_ck_...)
+TOSS_SECRET_KEY               토스페이먼츠 시크릿 키 (live_sk_... 또는 test_sk_...)
+NAVER_SENS_SERVICE_ID         NAVER Cloud SMS 프로젝트 Service ID
+NAVER_SENS_ACCESS_KEY         NAVER Cloud Access Key ID
+NAVER_SENS_SECRET_KEY         NAVER Cloud Secret Key
+NAVER_SENS_SENDER             인증된 발신번호 (하이픈 없이, 예: 01012345678)
+```
+
+### 설정 완료
+```
+DATABASE_URL                  postgresql+asyncpg://...@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres
+JWT_SECRET                    ✅
+ENVIRONMENT                   production
+SUPABASE_URL                  https://apghgbecayjfsuswaggf.supabase.co
+SUPABASE_ANON_KEY             ✅
+SUPABASE_SERVICE_ROLE_KEY     ✅
+MONITOR_API_TOKEN             ✅
+FCM_SERVICE_ACCOUNT_JSON      ✅ (Firebase Admin SDK 서비스 계정)
+VAPID_PRIVATE_KEY             ✅ (Web Push)
+VAPID_PUBLIC_KEY              ✅
+KAKAO_MAP_REST_API_KEY        ✅
+```
+
+---
+
+## Vercel 환경변수 — 프론트엔드 3개 프로젝트
+
+sepang-customer / sepang-partner / sepang-admin 공통
 
 ```
-main ─────────────────────────────── 프로덕션 (승인 필요)
-  └── release/v1.x ─────────────── RC 테스트
-develop ─────────────────────────── 스테이징 자동 배포
-  ├── feature/SL-001-order-api ─── 기능 개발
-  ├── fix/SL-042-sla-timer ──────── 버그 수정
-  └── hotfix/prod-crash ─────────── 긴급 수정 (main으로 직접 PR)
+NEXT_PUBLIC_SUPABASE_URL      https://apghgbecayjfsuswaggf.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY ✅
+NEXT_PUBLIC_API_URL           https://api.sepang.kr
+NEXT_PUBLIC_VAPID_PUBLIC_KEY  ✅ (Web Push — customer·partner만 해당)
 ```
+
+---
+
+## 서비스 URL (도메인 연동 완료)
+
+| 앱 | URL | Vercel 프로젝트 |
+|----|-----|----------------|
+| 고객 앱 | https://sepang.kr | sepang-customer |
+| 점주 앱 | https://partner.sepang.kr | sepang-partner |
+| 관리자 콘솔 | https://admin.sepang.kr | sepang-admin |
+| API | https://api.sepang.kr | sepang-api |
+
+---
 
 ## 배포 플로우
 
 ```
-feature/* → develop    → CI 통과 → 스테이징 자동 배포
-develop   → main (PR)  → CI + 승인 → 프로덕션 Blue/Green 배포
-                                   → 스모크 실패 시 자동 롤백
+feature/* → develop    →  CI (lint·test) 통과  →  Vercel Preview 자동 배포
+develop   → main (PR)  →  DB 마이그레이션       →  Vercel Production 배포
+                       →  Edge Functions 배포   →  스모크 테스트
 ```
+
+## 브랜치 전략
+
+```
+main ──────────────────────── 프로덕션 (직접 push 지양, PR 권장)
+  └── develop ──────────────── 스테이징 (Preview 배포)
+        ├── feature/SL-001    기능 개발
+        ├── fix/SL-042        버그 수정
+        └── hotfix/prod-crash 긴급 수정 (main으로 직접 PR)
+```
+
+---
+
+## 외부 서비스 발급 필요 항목
+
+### Toss Payments
+1. https://developers.tosspayments.com 접속
+2. 내 개발 정보 → API 키 발급
+3. `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY` → Vercel sepang-api 환경변수 등록
+
+### NAVER SENS (SMS)
+1. https://console.ncloud.com → Simple & Easy Notification Service
+2. 프로젝트 생성 → 발신번호 인증
+3. 4종 키 → Vercel sepang-api 환경변수 등록
