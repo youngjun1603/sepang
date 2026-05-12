@@ -24,14 +24,16 @@ sepang-admin    prj_q40A5Llde4FWxYnal6JHNVWO5Hj0
 Org ID          team_JBhMZkd4FWWdIinWku39uvFQ
 ```
 
-## 서비스 URL
+## 서비스 URL (도메인 연결 완료 ✅)
 
-| 앱 | 기본 URL | 커스텀 도메인 |
-|----|----------|---------------|
-| 고객 앱 | sepang-customer.vercel.app | sepang.kr |
-| 점주 앱 | sepang-partner.vercel.app | partner.sepang.kr |
-| 관리자 앱 | sepang-admin.vercel.app | admin.sepang.kr |
-| API | sepang-api.vercel.app | api.sepang.kr |
+| 앱 | 운영 URL | Vercel 기본 URL |
+|----|----------|-----------------|
+| 고객 앱 | **sepang.kr** | sepang-customer.vercel.app |
+| 점주 앱 | **partner.sepang.kr** | sepang-partner.vercel.app |
+| 관리자 앱 | **admin.sepang.kr** | sepang-admin.vercel.app |
+| API | **api.sepang.kr** | sepang-api.vercel.app |
+
+DNS: A 레코드 `@`, `partner`, `admin` → `76.76.21.21` / CNAME `api` → `5bfcb480b34eff12.vercel-dns-017.com`
 
 ## 주요 기술 결정
 
@@ -94,7 +96,7 @@ KAKAO_MAP_REST_API_KEY    (등록 완료)
 ```
 NEXT_PUBLIC_SUPABASE_URL      https://apghgbecayjfsuswaggf.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY (설정됨)
-NEXT_PUBLIC_API_URL           https://sepang-api.vercel.app
+NEXT_PUBLIC_API_URL           https://api.sepang.kr
 ```
 
 ### GitHub Secrets
@@ -202,10 +204,14 @@ Vercel(IPv4 전용) + Supabase 연결 시 반드시 아래 규칙 준수:
 - **원인**: Vercel 대시보드 "Redeploy" 버튼은 prebuilt 아티팩트를 재사용 → 환경변수 변경 미적용
 - **수정**: 코드 변경(또는 empty commit)을 push하여 GitHub Actions CD 통해 fresh build 트리거
 
+### 에러 7: `api.sepang.kr` SSL 핸드셰이크 실패 (HTTP 000)
+- **원인**: `vercel alias set`으로 단순 alias만 생성 → Vercel이 SSL 인증서를 발급하지 않음. 다른 3개 도메인은 `vercel domains add`(프로젝트 도메인)로 등록되어 SSL이 정상 발급되었으나 `api.sepang.kr`만 누락
+- **수정**: Vercel 대시보드 → sepang-api → Settings → Domains → `api.sepang.kr` 직접 추가 → DNS를 A레코드에서 CNAME(`5bfcb480b34eff12.vercel-dns-017.com`)으로 변경 → Valid Configuration 확인
+
 ## 남은 작업
 
-1. **도메인 연결**: sepang.kr, partner.sepang.kr, admin.sepang.kr, api.sepang.kr → Vercel DNS
+1. ~~**도메인 연결**~~ ✅ 완료 (2026-05-13) — 4개 도메인 모두 연결 및 SSL 발급 완료
 
-2. **Toss Payments**: 클라이언트가 API 키 발급 → `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY` Vercel 등록
+2. **Toss Payments**: 클라이언트가 API 키 발급 → `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY` Vercel sepang-api 등록
 
-3. **NAVER SENS**: 클라이언트가 API 키 발급 → `NAVER_SENS_SERVICE_ID`, `NAVER_SENS_ACCESS_KEY`, `NAVER_SENS_SECRET_KEY`, `NAVER_SENS_SENDER` Vercel 등록
+3. **NAVER SENS**: 클라이언트가 API 키 발급 → `NAVER_SENS_SERVICE_ID`, `NAVER_SENS_ACCESS_KEY`, `NAVER_SENS_SECRET_KEY`, `NAVER_SENS_SENDER` Vercel sepang-api 등록
