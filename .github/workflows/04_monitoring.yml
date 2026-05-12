@@ -6,7 +6,7 @@ name: Monitoring & Health
 
 # 도메인 연결 후 아래 변수만 변경
 env:
-  API_URL:      https://api.sepang.kr
+  API_URL:      https://sepang-api.vercel.app   # TODO: https://api.sepang.kr (도메인 검증 완료 후)
   CUSTOMER_URL: https://sepang.kr
   PARTNER_URL:  https://partner.sepang.kr
 
