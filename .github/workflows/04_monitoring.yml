@@ -1,6 +1,6 @@
 # ============================================================
 # 모니터링 — 헬스 체크 + SLA 감시
-# 5분마다 실행 / 매일 03:00 KST Supabase 연결 확인
+# 2시간마다 실행 / 매일 03:00 KST Supabase 연결 확인
 # ============================================================
 name: Monitoring & Health
 
@@ -12,7 +12,7 @@ env:
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # 10분마다 — 헬스 체크
+    - cron: "0 */2 * * *"    # 2시간마다 — 헬스 체크
     - cron: "0 18 * * *"     # 매일 18:00 UTC (03:00 KST) — DB 상태 확인
   workflow_dispatch:
 
@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.schedule == '*/10 * * * *'
+      github.event.schedule == '0 */2 * * *'
 
     steps:
       - name: Check all endpoints
@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.schedule == '*/10 * * * *'
+      github.event.schedule == '0 */2 * * *'
 
     steps:
       - name: Check SLA at-risk orders via API
