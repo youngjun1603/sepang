@@ -258,7 +258,7 @@ async def create_order(
     weather_condition, weather_multiplier = await get_weather_multiplier(
         req.pickup_lat, req.pickup_lng, db
     )
-    weather_amount = int(base_amount * weather_multiplier)
+    weather_amount = int(round(base_amount * weather_multiplier))
 
     # ── 거리 요금 적용 (가장 가까운 활성 매장 기준) ─────────────
     distance_km = 0.0

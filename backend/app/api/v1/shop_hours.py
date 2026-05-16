@@ -63,7 +63,7 @@ def _row_to_out(row) -> dict:
     }
 
 
-async def _default_hours(shop_id: str) -> list[dict]:
+def _default_hours(shop_id: str) -> list[dict]:
     """운영 시간 미설정 시 기본값 (24h 영업 7일)"""
     return [
         {
@@ -102,7 +102,7 @@ async def get_my_shop_hours(
     rows = result.fetchall()
 
     if not rows:
-        return await _default_hours(shop_id)
+        return _default_hours(shop_id)
 
     # 누락된 요일 기본값(24h)으로 채우기
     existing = {r.day_of_week: r for r in rows}
@@ -176,7 +176,7 @@ async def get_shop_hours_public(
     )
     rows = result.fetchall()
     if not rows:
-        return await _default_hours(shop_id)
+        return _default_hours(shop_id)
 
     existing = {r.day_of_week: r for r in rows}
     result_list = []

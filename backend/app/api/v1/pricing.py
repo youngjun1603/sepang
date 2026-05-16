@@ -251,7 +251,7 @@ async def preview_price(
     dist_result = dist_row.fetchone()
     distance_surcharge = dist_result.surcharge if dist_result else 0
 
-    weather_amount = int(req.base_amount * weather_mult)
+    weather_amount = int(round(req.base_amount * weather_mult))
     final_amount   = weather_amount + distance_surcharge
 
     return {
