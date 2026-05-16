@@ -114,8 +114,10 @@ _CUSTOMER_NOTIFY = {
     "CANCELLED":  ("주문 취소 ❌", "주문이 취소되었습니다."),
 }
 
-# 고객이 취소 가능한 상태 (수거 전)
-CUSTOMER_CANCELLABLE = {"PENDING", "ACCEPTED"}
+# 고객이 취소 가능한 상태 (점주 수락 전)
+CUSTOMER_CANCELLABLE = {"PENDING"}
+# 점주가 취소 가능한 상태 (고객 전화 요청 시 — 수락 후 수거 단계까지)
+PARTNER_CANCELLABLE = {"ACCEPTED", "PICKED_UP"}
 # 관리자도 취소 불가능한 최종 상태
 ADMIN_NON_CANCELLABLE = {"CANCELLED", "COMPLETED"}
 
@@ -408,7 +410,7 @@ async def cancel_order(
     db:          AsyncSession = Depends(get_db),
     current_user = Depends(require_role("CUSTOMER")),
 ):
-    """고객 주문 취소 — PENDING / ACCEPTED 상태만 가능"""
+    """고객 주문 취소 — 점주 수락 전(PENDING)만 가능"""
     result = await db.execute(
         text("""
             SELECT id, status::text, customer_id, coupon_id, points_used,
@@ -423,9 +425,47 @@ async def cancel_order(
     if str(order.customer_id) != str(current_user.id):
         raise HTTPException(403, "본인 주문만 취소할 수 있습니다")
     if order.status not in CUSTOMER_CANCELLABLE:
-        raise HTTPException(400, "수거 전(접수·수락) 주문만 취소할 수 있습니다")
+        raise HTTPException(400, "점주가 수락하기 전 주문만 취소할 수 있습니다. 취소가 필요하면 점주에게 직접 연락해 주세요.")
 
     await _do_cancel_order(db, order, "고객 취소")
+    return {"success": True}
+
+
+class PartnerCancelRequest(BaseModel):
+    cancel_reason: str
+
+
+@router.post("/{order_id}/partner-cancel")
+async def partner_cancel_order(
+    order_id:    UUID,
+    req:         PartnerCancelRequest,
+    db:          AsyncSession = Depends(get_db),
+    current_user = Depends(require_role("PARTNER")),
+):
+    """
+    점주 주문 취소 — 고객이 전화로 요청한 경우 점주가 직접 취소.
+    ACCEPTED·PICKED_UP 상태만 가능.
+    """
+    if not current_user.shop_id:
+        raise HTTPException(400, "등록된 매장이 없습니다")
+
+    result = await db.execute(
+        text("""
+            SELECT id, status::text, shop_id, customer_id, coupon_id, points_used,
+                   payment_status::text, payment_key
+            FROM orders WHERE id = :id
+        """),
+        {"id": order_id},
+    )
+    order = result.fetchone()
+    if not order:
+        raise HTTPException(404, "주문을 찾을 수 없습니다")
+    if not order.shop_id or str(order.shop_id) != str(current_user.shop_id):
+        raise HTTPException(403, "담당 주문만 취소할 수 있습니다")
+    if order.status not in PARTNER_CANCELLABLE:
+        raise HTTPException(400, "수락 또는 수거 완료 상태의 주문만 취소할 수 있습니다")
+
+    await _do_cancel_order(db, order, f"점주 취소 — {req.cancel_reason}")
     return {"success": True}
 
 

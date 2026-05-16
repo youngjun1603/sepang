@@ -217,10 +217,12 @@ async def cancel_payment(
     if not is_admin and not is_owner:
         raise HTTPException(403, "권한이 없습니다")
 
-    # 고객은 수거 전 상태만 취소 가능
-    CANCELLABLE_STATUSES = {"PENDING", "ACCEPTED"}
-    if not is_admin and order.order_status not in CANCELLABLE_STATUSES:
-        raise HTTPException(400, "수거 전(접수·수락) 상태의 주문만 취소할 수 있습니다")
+    # 고객은 점주 수락 전(PENDING)만 취소 가능, 점주는 ACCEPTED·PICKED_UP 취소 가능
+    if not is_admin:
+        if is_owner and order.order_status not in {"PENDING"}:
+            raise HTTPException(400, "점주가 수락하기 전 주문만 취소할 수 있습니다. 취소가 필요하면 점주에게 직접 연락해 주세요.")
+        if not is_owner:
+            raise HTTPException(403, "권한이 없습니다")
 
     if order.payment_status != "PAID":
         raise HTTPException(400, "결제 완료 상태의 주문만 취소할 수 있습니다")
