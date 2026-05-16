@@ -44,11 +44,12 @@ def upgrade() -> None:
             updated_by  UUID REFERENCES users(id) ON DELETE SET NULL
         );
 
+        -- 구간: min_km 이상 max_km 미만 (1.0km → 0~1km 구간, 1.0001km → 1~2km 구간)
         INSERT INTO distance_pricing (min_km, max_km, surcharge, description) VALUES
-            (0,    1.0,  0,    '1km 이내 — 기본 요금'),
-            (1.0,  2.0,  1000, '1~2km — +1,000원'),
-            (2.0,  3.0,  2000, '2~3km — +2,000원'),
-            (3.0,  NULL, 3000, '3km 초과 — +3,000원');
+            (0,    1.0,  0,    '1km 미만 — 기본 요금'),
+            (1.0,  2.0,  1000, '1km 이상 2km 미만 — +1,000원'),
+            (2.0,  3.0,  2000, '2km 이상 3km 미만 — +2,000원'),
+            (3.0,  NULL, 3000, '3km 이상 — +3,000원');
     """)
 
     # ── 3. 매장 운영 시간 ────────────────────────────────────────

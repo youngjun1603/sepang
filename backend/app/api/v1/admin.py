@@ -625,11 +625,11 @@ async def unsuspend_shop(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_role("ADMIN")),
 ):
-    """점주 영업 정지 해제"""
+    """점주 영업 정지 해제 — penalty_score 초기화 + is_available 복구"""
     result = await db.execute(
         text("""
             UPDATE shops
-            SET penalty_suspended = false, penalty_score = 0
+            SET penalty_suspended = false, penalty_score = 0, is_available = true
             WHERE id = :shop_id
             RETURNING id, name
         """),

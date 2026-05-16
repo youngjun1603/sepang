@@ -285,7 +285,7 @@ async def create_order(
     adjusted_base = weather_amount + distance_surcharge
 
     discount = await _apply_coupon(db, req.coupon_id, adjusted_base, current_user.id) if req.coupon_id else 0
-    after_coupon = adjusted_base - discount
+    after_coupon = max(0, adjusted_base - discount)  # 쿠폰 과할인 방어
 
     points_used = 0
     point_balance = 0
@@ -296,9 +296,9 @@ async def create_order(
         )
         point_balance = pts.scalar() or 0
         if point_balance > 0:
-            points_used = min(point_balance, after_coupon)
+            points_used = min(point_balance, after_coupon)  # after_coupon이 0이면 포인트도 0
 
-    total = after_coupon - points_used
+    total = max(0, after_coupon - points_used)  # 최종 음수 방어
 
     result = await db.execute(
         text("""
@@ -573,6 +573,8 @@ async def get_nearby_orders(
     db:          AsyncSession = Depends(get_db),
     current_user = Depends(require_role("PARTNER")),
 ):
+    if not current_user.shop_id:
+        raise HTTPException(400, "등록된 매장이 없습니다. 관리자에게 문의하세요.")
     result = await db.execute(
         text("SELECT * FROM get_nearby_orders(:shop_id, 3)"),
         {"shop_id": current_user.shop_id}
@@ -709,16 +711,20 @@ async def reject_order(
     점주 주문 거절 — PENDING 상태만 가능.
     거절 시 패널티 1점 부과, 누적 10점 시 자동 영업 정지.
     """
+    # PENDING 주문은 아직 shop_id=NULL 이므로 orders 테이블만 조회
+    # 점주 본인의 shop_id는 current_user.shop_id 사용
+    if not current_user.shop_id:
+        raise HTTPException(400, "등록된 매장이 없습니다")
+
     result = await db.execute(
         text("""
             SELECT o.id, o.status::text, o.customer_id,
-                   o.ordered_at, s.id AS shop_id, u.fcm_token
+                   o.ordered_at, u.fcm_token
             FROM orders o
-            JOIN shops s  ON s.owner_id = :uid
-            JOIN users u  ON u.id = o.customer_id
+            JOIN users u ON u.id = o.customer_id
             WHERE o.id = :oid
         """),
-        {"oid": order_id, "uid": current_user.id},
+        {"oid": order_id},
     )
     order = result.fetchone()
     if not order:
@@ -735,9 +741,11 @@ async def reject_order(
         {"reason": req.reason or "점주 거절", "id": order_id},
     )
 
+    shop_id_str = str(current_user.shop_id)
+
     # 패널티: 거절 1점
     await _record_penalty(
-        db, str(order.shop_id), order_id,
+        db, shop_id_str, order_id,
         penalty_type="REJECTION",
         penalty_point=1,
         description=f"주문 거절: {req.reason or '사유 없음'}",
@@ -751,7 +759,7 @@ async def reject_order(
     elapsed_min = (dt.now(tz.utc) - ordered_at).total_seconds() / 60
     if elapsed_min > 30:
         await _record_penalty(
-            db, str(order.shop_id), order_id,
+            db, shop_id_str, order_id,
             penalty_type="LATE_ACCEPT",
             penalty_point=1,
             description=f"수락 지연 {int(elapsed_min)}분 후 거절",
