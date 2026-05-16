@@ -1,14 +1,14 @@
 """
-기상청 초단기실황 API 연동
-──────────────────────────
-- 위경도 → 기상청 격자 좌표 변환 (Lambert Conformal Conic)
-- 현재 강수 형태(PTY) 조회
+기상청 ASOS 지상관측 시간자료 API 연동
+End Point: https://apis.data.go.kr/1360000/AsosHourlyInfoService/getWthrDataList
+- 위경도 → 가장 가까운 ASOS 관측소 매핑
+- 강수량(rn_60m) / 신적설(dsnw) 기반 날씨 조건 판별
 - 30분 인메모리 캐시 (Vercel cold start 대응)
 """
 from __future__ import annotations
 import math
 from datetime import datetime, timezone, timedelta
-from typing import Literal, Optional
+from typing import Literal
 
 import httpx
 
@@ -16,121 +16,140 @@ from app.core.config import settings
 
 WeatherCondition = Literal["NONE", "RAIN", "SNOW", "RAIN_SNOW"]
 
-# ── 격자 좌표 변환 상수 ────────────────────────────────────────────
-_RE     = 6371.00877
-_GRID   = 5.0
-_SLAT1  = 30.0
-_SLAT2  = 60.0
-_OLON   = 126.0
-_OLAT   = 38.0
-_XO     = 43
-_YO     = 136
-_DEGRAD = math.pi / 180.0
+# ── 주요 ASOS 관측소 (지점번호, 위도, 경도, 지점명) ─────────────────────────
+# 출처: 기상청 기후자료 개방 포털 관측소 목록 기준
+_ASOS_STATIONS: list[tuple[int, float, float, str]] = [
+    (108, 37.5714, 126.9658, "서울"),
+    (112, 37.4772, 126.6244, "인천"),
+    (119, 37.2721, 127.0047, "수원"),
+    (129, 37.8963, 127.7174, "춘천"),
+    (131, 37.7501, 128.8956, "강릉"),
+    (133, 36.3691, 127.3742, "대전"),
+    (136, 36.5268, 126.3311, "보령"),
+    (138, 36.0160, 129.3578, "포항"),
+    (143, 35.8839, 128.6183, "대구"),
+    (146, 35.8242, 127.1479, "전주"),
+    (152, 35.5325, 129.3231, "울산"),
+    (155, 35.1795, 128.5683, "창원"),
+    (156, 35.1719, 126.8929, "광주"),
+    (159, 35.1042, 129.0323, "부산"),
+    (162, 34.8458, 128.4383, "통영"),
+    (165, 34.8147, 126.3817, "목포"),
+    (184, 33.5147, 126.5298, "제주"),
+    (185, 33.2449, 126.5656, "서귀포"),
+]
 
-def _latlon_to_grid(lat: float, lon: float) -> tuple[int, int]:
-    """위경도 → 기상청 격자(nx, ny) 변환"""
-    slat1 = _SLAT1 * _DEGRAD
-    slat2 = _SLAT2 * _DEGRAD
-    olon  = _OLON  * _DEGRAD
-    olat  = _OLAT  * _DEGRAD
-
-    sn = math.tan(math.pi * 0.25 + slat2 * 0.5) / math.tan(math.pi * 0.25 + slat1 * 0.5)
-    sn = math.log(math.cos(slat1) / math.cos(slat2)) / math.log(sn)
-    sf = math.tan(math.pi * 0.25 + slat1 * 0.5)
-    sf = (sf ** sn) * math.cos(slat1) / sn
-    ro = math.tan(math.pi * 0.25 + olat * 0.5)
-    ro = _RE / _GRID * sf / (ro ** sn)
-
-    ra = math.tan(math.pi * 0.25 + lat * _DEGRAD * 0.5)
-    ra = _RE / _GRID * sf / (ra ** sn)
-
-    theta = lon * _DEGRAD - olon
-    if theta >  math.pi: theta -= 2.0 * math.pi
-    if theta < -math.pi: theta += 2.0 * math.pi
-    theta *= sn
-
-    nx = int(ra * math.sin(theta) + _XO + 0.5)
-    ny = int(ro - ra * math.cos(theta) + _YO + 0.5)
-    return nx, ny
-
-
-# ── 강수 형태 코드 매핑 ────────────────────────────────────────────
-# PTY: 0=없음, 1=비, 2=비/눈, 3=눈, 5=빗방울, 6=빗방울눈날림, 7=눈날림
-_PTY_MAP: dict[str, WeatherCondition] = {
-    "0": "NONE",
-    "1": "RAIN",
-    "2": "RAIN_SNOW",
-    "3": "SNOW",
-    "5": "RAIN",
-    "6": "RAIN_SNOW",
-    "7": "SNOW",
-}
-
-# ── 인메모리 캐시 (grid → (condition, expires)) ─────────────────────
-_cache: dict[tuple[int, int], tuple[WeatherCondition, datetime]] = {}
+# ── 30분 캐시 {stn_id: (condition, expires_at)} ────────────────────────────
+_cache: dict[int, tuple[WeatherCondition, datetime]] = {}
 _CACHE_TTL_MIN = 30
 
 
-def _get_base_time() -> tuple[str, str]:
-    """기상청 API용 base_date, base_time 계산 (10분 단위 실황)"""
-    now = datetime.now(timezone(timedelta(hours=9)))  # KST
-    # 초단기실황은 매 정시 발표, 가장 최근 정각
-    base = now.replace(minute=0, second=0, microsecond=0)
-    return base.strftime("%Y%m%d"), base.strftime("%H%M")
+def _nearest_station(lat: float, lng: float) -> int:
+    """위경도에서 유클리드 거리 기준 가장 가까운 ASOS 지점번호 반환"""
+    best_stn_id = _ASOS_STATIONS[0][0]
+    best_dist = float("inf")
+    for stn_id, slat, slng, _ in _ASOS_STATIONS:
+        dist = math.sqrt((lat - slat) ** 2 + (lng - slng) ** 2)
+        if dist < best_dist:
+            best_dist = dist
+            best_stn_id = stn_id
+    return best_stn_id
 
 
-async def get_weather_condition(lat: float, lon: float) -> WeatherCondition:
+def _kst_now() -> datetime:
+    return datetime.now(timezone(timedelta(hours=9)))
+
+
+async def _fetch_asos(stn_id: int, kst: datetime) -> WeatherCondition:
     """
-    현재 위치의 강수 형태 반환.
-    API 키 미설정 시 NONE 반환 (graceful fallback).
+    ASOS API 호출 — 현재 시각 기준 1시간 강수량·신적설로 날씨 조건 판별.
+    데이터가 없으면 직전 시각으로 재시도.
+    """
+    for hour_offset in (0, 1):  # 현재 시각 → 데이터 미수신 시 1시간 전 재시도
+        target = kst - timedelta(hours=hour_offset)
+        date_str = target.strftime("%Y%m%d")
+        hour_str = f"{target.hour:02d}"
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    "https://apis.data.go.kr/1360000/AsosHourlyInfoService/getWthrDataList",
+                    params={
+                        "serviceKey": settings.KMA_SERVICE_KEY,
+                        "pageNo":     1,
+                        "numOfRows":  1,
+                        "dataType":   "JSON",
+                        "dataCd":     "ASOS",
+                        "dateCd":     "HR",
+                        "startDt":    date_str,
+                        "startHh":    hour_str,
+                        "endDt":      date_str,
+                        "endHh":      hour_str,
+                        "stnIds":     str(stn_id),
+                    },
+                )
+            body = resp.json().get("response", {}).get("body", {})
+            items = body.get("items", {})
+            if not items:
+                continue
+            item_list = items.get("item", [])
+            if not item_list:
+                continue
+
+            item = item_list[0] if isinstance(item_list, list) else item_list
+
+            # 1시간 강수량 (mm) — rn_60m 우선, 없으면 rn
+            rn_raw  = item.get("rn_60m") or item.get("rn") or "0"
+            # 신적설 (cm)
+            dsnw_raw = item.get("dsnw") or "0"
+
+            rn   = float(rn_raw)   if str(rn_raw).replace(".", "", 1).lstrip("-").isdigit() else 0.0
+            dsnw = float(dsnw_raw) if str(dsnw_raw).replace(".", "", 1).lstrip("-").isdigit() else 0.0
+
+            if rn > 0 and dsnw > 0:
+                return "RAIN_SNOW"
+            if dsnw > 0:
+                return "SNOW"
+            if rn > 0:
+                return "RAIN"
+            return "NONE"
+
+        except Exception:
+            continue
+
+    return "NONE"
+
+
+async def get_weather_condition(lat: float, lng: float) -> WeatherCondition:
+    """
+    현재 위치의 강수 조건 반환.
+    KMA_SERVICE_KEY 미설정 시 NONE 반환 (graceful fallback).
     """
     if not settings.KMA_SERVICE_KEY:
         return "NONE"
 
-    nx, ny = _latlon_to_grid(lat, lon)
-    now = datetime.now(timezone.utc)
+    stn_id = _nearest_station(lat, lng)
+    now_utc = datetime.now(timezone.utc)
 
-    # 캐시 확인
-    cached = _cache.get((nx, ny))
-    if cached and cached[1] > now:
+    cached = _cache.get(stn_id)
+    if cached and cached[1] > now_utc:
         return cached[0]
 
-    base_date, base_time = _get_base_time()
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst",
-                params={
-                    "serviceKey": settings.KMA_SERVICE_KEY,
-                    "numOfRows":  10,
-                    "pageNo":     1,
-                    "dataType":   "JSON",
-                    "base_date":  base_date,
-                    "base_time":  base_time,
-                    "nx":         nx,
-                    "ny":         ny,
-                },
-            )
-        data = resp.json()
-        items = data["response"]["body"]["items"]["item"]
-        pty = next((i["obsrValue"] for i in items if i["category"] == "PTY"), "0")
-        condition: WeatherCondition = _PTY_MAP.get(str(pty), "NONE")
-    except Exception:
-        condition = "NONE"
-
-    _cache[(nx, ny)] = (condition, now + timedelta(minutes=_CACHE_TTL_MIN))
+    condition = await _fetch_asos(stn_id, _kst_now())
+    _cache[stn_id] = (condition, now_utc + timedelta(minutes=_CACHE_TTL_MIN))
     return condition
 
 
-async def get_weather_multiplier(lat: float, lon: float, db) -> tuple[WeatherCondition, float]:
+async def get_weather_multiplier(
+    lat: float, lng: float, db
+) -> tuple[WeatherCondition, float]:
     """
-    날씨 조건과 적용 배율 반환.
+    날씨 조건과 요금 배수 반환.
     weather_pricing 테이블의 활성 설정 기준.
     """
     from sqlalchemy import text
 
-    condition = await get_weather_condition(lat, lon)
+    condition = await get_weather_condition(lat, lng)
     if condition == "NONE":
         return "NONE", 1.0
 
