@@ -196,10 +196,16 @@ async def cancel_payment(
 ):
     """
     결제 취소/환불.
-    고객: 본인 주문만 / 관리자: 모든 주문
+    - 고객: 수거 전(PENDING·ACCEPTED) 상태만 가능
+    - 관리자: 모든 주문 가능
+    쿠폰·포인트 자동 복원 + 점주 알림 포함
     """
     result = await db.execute(
-        text("SELECT id, payment_key, payment_status, customer_id, total_amount FROM orders WHERE id = :id"),
+        text("""
+            SELECT id, payment_key, payment_status, customer_id, total_amount,
+                   status::text AS order_status, coupon_id, points_used, shop_id
+            FROM orders WHERE id = :id
+        """),
         {"id": order_id},
     )
     order = result.fetchone()
@@ -210,12 +216,18 @@ async def cancel_payment(
     is_owner = str(order.customer_id) == str(current_user.id)
     if not is_admin and not is_owner:
         raise HTTPException(403, "권한이 없습니다")
+
+    # 고객은 수거 전 상태만 취소 가능
+    CANCELLABLE_STATUSES = {"PENDING", "ACCEPTED"}
+    if not is_admin and order.order_status not in CANCELLABLE_STATUSES:
+        raise HTTPException(400, "수거 전(접수·수락) 상태의 주문만 취소할 수 있습니다")
+
     if order.payment_status != "PAID":
         raise HTTPException(400, "결제 완료 상태의 주문만 취소할 수 있습니다")
     if not order.payment_key:
         raise HTTPException(400, "결제 키가 없습니다")
 
-    # 토스페이먼츠 취소 요청
+    # ── 1. 토스페이먼츠 환불 요청 ──────────────────────────────
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             f"{TOSS_API_BASE}/{order.payment_key}/cancel",
@@ -227,6 +239,7 @@ async def cancel_payment(
     if resp.status_code != 200:
         raise HTTPException(400, toss_data.get("message", "결제 취소에 실패했습니다"))
 
+    # ── 2. 주문 상태 업데이트 ──────────────────────────────────
     await db.execute(
         text("""
             UPDATE orders
@@ -247,9 +260,82 @@ async def cancel_payment(
         """),
         {"reason": req.cancel_reason, "oid": order_id},
     )
+
+    # ── 3. 쿠폰 복원 ──────────────────────────────────────────
+    if order.coupon_id:
+        await db.execute(
+            text("""
+                UPDATE user_coupons
+                SET used_at = NULL, order_id = NULL
+                WHERE coupon_id = :cid AND user_id = :uid
+            """),
+            {"cid": order.coupon_id, "uid": order.customer_id},
+        )
+
+    # ── 4. 포인트 복원 ────────────────────────────────────────
+    points_used = order.points_used or 0
+    if points_used > 0:
+        bal_row = await db.execute(
+            text("""
+                SELECT COALESCE(balance, 0) FROM point_transactions
+                WHERE user_id = :uid ORDER BY created_at DESC LIMIT 1
+            """),
+            {"uid": order.customer_id},
+        )
+        cur_bal = (bal_row.fetchone() or (0,))[0]
+        await db.execute(
+            text("""
+                INSERT INTO point_transactions (user_id, amount, balance, reason, order_id)
+                VALUES (:uid, :amt, :bal, '결제 취소 포인트 환불', :oid)
+            """),
+            {
+                "uid": order.customer_id,
+                "amt": points_used,
+                "bal": cur_bal + points_used,
+                "oid": order_id,
+            },
+        )
+
     await db.commit()
 
-    return {"success": True, "status": "REFUNDED"}
+    # ── 5. 알림 전송 (비동기) ─────────────────────────────────
+    import asyncio
+    from app.services.notification import send_customer_status_notification
+
+    notif_row = await db.execute(
+        text("""
+            SELECT cu.fcm_token AS customer_fcm, cu.id::text AS customer_id,
+                   pu.fcm_token AS partner_fcm,  pu.id::text AS partner_id
+            FROM orders o
+            JOIN users cu ON cu.id = o.customer_id
+            LEFT JOIN shops sh ON sh.id = o.shop_id
+            LEFT JOIN users pu ON pu.id = sh.owner_id
+            WHERE o.id = :oid
+        """),
+        {"oid": order_id},
+    )
+    notif = notif_row.fetchone()
+    if notif:
+        asyncio.create_task(
+            send_customer_status_notification(
+                notif.customer_id, notif.customer_fcm, str(order_id),
+                "결제 취소 완료 ✅", "결제가 취소되고 환불이 진행됩니다.",
+            )
+        )
+        if notif.partner_fcm:
+            asyncio.create_task(
+                send_customer_status_notification(
+                    notif.partner_id, notif.partner_fcm, str(order_id),
+                    "담당 주문 취소 ❌", f"고객이 결제를 취소했습니다. ({req.cancel_reason})",
+                )
+            )
+
+    return {
+        "success":       True,
+        "status":        "REFUNDED",
+        "coupon_restored":  bool(order.coupon_id),
+        "points_restored":  points_used,
+    }
 
 
 @router.get("/{order_id}")
