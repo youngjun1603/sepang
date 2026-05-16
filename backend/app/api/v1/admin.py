@@ -523,6 +523,126 @@ async def get_marketing_stats(
     }
 
 
+# ── 패널티 관련 엔드포인트 ────────────────────────────────────────────────────
+
+@router.get("/penalties")
+async def list_penalties(
+    request: Request,
+    shop_id: Optional[str] = Query(None),
+    penalty_type: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    """패널티 내역 조회"""
+    where = "WHERE 1=1"
+    params: dict = {"limit": limit}
+    if shop_id:
+        where += " AND pp.shop_id = :shop_id"
+        params["shop_id"] = shop_id
+    if penalty_type:
+        where += " AND pp.penalty_type = :ptype"
+        params["ptype"] = penalty_type
+
+    rows = await db.execute(text(f"""
+        SELECT
+            pp.id::text,
+            s.name         AS shop_name,
+            pp.order_id::text,
+            pp.penalty_type,
+            pp.penalty_point,
+            pp.description,
+            pp.created_at::text,
+            s.penalty_score,
+            s.penalty_suspended
+        FROM partner_penalties pp
+        JOIN shops s ON s.id = pp.shop_id
+        {where}
+        ORDER BY pp.created_at DESC
+        LIMIT :limit
+    """), params)
+
+    await _audit(db, request, current_user, "패널티 내역 조회")
+    return [dict(r._mapping) for r in rows.fetchall()]
+
+
+@router.get("/penalties/summary")
+async def penalty_summary(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    """점주별 패널티 누적 현황 요약"""
+    rows = await db.execute(text("""
+        SELECT
+            s.id::text                      AS shop_id,
+            s.name                          AS shop_name,
+            s.penalty_score,
+            s.penalty_suspended,
+            COUNT(pp.id)                    AS total_penalties,
+            COUNT(pp.id) FILTER (WHERE pp.penalty_type = 'LATE_ACCEPT')  AS late_count,
+            COUNT(pp.id) FILTER (WHERE pp.penalty_type = 'REJECTION')    AS reject_count,
+            COUNT(pp.id) FILTER (WHERE pp.penalty_type = 'NO_RESPONSE')  AS no_response_count,
+            MAX(pp.created_at)::text        AS last_penalty_at
+        FROM shops s
+        LEFT JOIN partner_penalties pp ON pp.shop_id = s.id
+        WHERE s.is_active = true
+        GROUP BY s.id, s.name, s.penalty_score, s.penalty_suspended
+        ORDER BY s.penalty_score DESC, s.name
+    """))
+    return [dict(r._mapping) for r in rows.fetchall()]
+
+
+@router.post("/penalties/{shop_id}/suspend")
+async def suspend_shop(
+    shop_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    """점주 영업 정지 처리"""
+    result = await db.execute(
+        text("""
+            UPDATE shops
+            SET penalty_suspended = true, is_available = false
+            WHERE id = :shop_id
+            RETURNING id, name
+        """),
+        {"shop_id": shop_id},
+    )
+    row = result.fetchone()
+    if not row:
+        raise HTTPException(404, "매장을 찾을 수 없습니다")
+    await db.commit()
+    await _audit(db, request, current_user, f"점주 영업 정지: {row.name} ({shop_id})")
+    return {"success": True, "shop_name": row.name}
+
+
+@router.post("/penalties/{shop_id}/unsuspend")
+async def unsuspend_shop(
+    shop_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    """점주 영업 정지 해제"""
+    result = await db.execute(
+        text("""
+            UPDATE shops
+            SET penalty_suspended = false, penalty_score = 0
+            WHERE id = :shop_id
+            RETURNING id, name
+        """),
+        {"shop_id": shop_id},
+    )
+    row = result.fetchone()
+    if not row:
+        raise HTTPException(404, "매장을 찾을 수 없습니다")
+    await db.commit()
+    await _audit(db, request, current_user, f"점주 영업 정지 해제: {row.name} ({shop_id})")
+    return {"success": True, "shop_name": row.name}
+
+
 @router.get("/audit-logs", response_model=list[AuditLog])
 async def get_audit_logs(
     request: Request,

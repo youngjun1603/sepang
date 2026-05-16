@@ -8,6 +8,8 @@ from app.api.v1.reviews     import router as reviews_router
 from app.api.v1.geocoding   import router as geocoding_router
 from app.api.v1.payments    import router as payments_router
 from app.api.v1.wash_items  import router as wash_items_router
+from app.api.v1.pricing     import router as pricing_router
+from app.api.v1.shop_hours  import router as shop_hours_router
 
 router = APIRouter()
 router.include_router(auth_router,        tags=["auth"])
@@ -19,6 +21,8 @@ router.include_router(settlements_router, tags=["settlements"])
 router.include_router(reviews_router,     tags=["reviews"])
 router.include_router(geocoding_router,   tags=["geocode"])
 router.include_router(wash_items_router,  tags=["wash-items"])
+router.include_router(pricing_router,     tags=["pricing"])
+router.include_router(shop_hours_router,  tags=["shop-hours"])
 
 @router.get("/health")
 async def health():

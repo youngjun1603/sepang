@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     # 모니터링 전용 정적 토큰 (GitHub Actions → sla-at-risk 엔드포인트용)
     MONITOR_API_TOKEN: str = ""
 
+    # 기상청 API (날씨 요금 적용) — data.go.kr 신청
+    KMA_SERVICE_KEY: str = ""
+
     # App
     ENVIRONMENT:    str = "production"
     DEBUG:          bool = False

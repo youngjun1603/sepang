@@ -5,6 +5,7 @@ POST   /api/v1/orders                주문 생성
 POST   /api/v1/orders/{id}/cancel    주문 취소 (고객, PENDING/ACCEPTED만)
 GET    /api/v1/orders/{id}           주문 상세
 PATCH  /api/v1/orders/{id}/status    상태 변경 (점주)
+POST   /api/v1/orders/{id}/reject    주문 거절 (점주)
 POST   /api/v1/orders/{id}/photos    사진 업로드
 GET    /api/v1/orders/partner/nearby 반경 내 주문 목록
 """
@@ -28,6 +29,7 @@ from app.core.config import settings
 from app.models.order import Order, OrderStatus
 from app.services.notification import send_nearby_partner_notifications, send_customer_status_notification, send_sms
 from app.services.geo import find_nearby_shops
+from app.services.weather import get_weather_multiplier
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -252,8 +254,38 @@ async def create_order(
         raise HTTPException(400, f"유효하지 않은 세탁 품목입니다: {req.wash_category}")
     base_amount = item.base_price
 
-    discount = await _apply_coupon(db, req.coupon_id, base_amount, current_user.id) if req.coupon_id else 0
-    after_coupon = base_amount - discount
+    # ── 날씨 요금 적용 ─────────────────────────────────────────
+    weather_condition, weather_multiplier = await get_weather_multiplier(
+        req.pickup_lat, req.pickup_lng, db
+    )
+    weather_amount = int(base_amount * weather_multiplier)
+
+    # ── 거리 요금 적용 (가장 가까운 활성 매장 기준) ─────────────
+    distance_km = 0.0
+    distance_surcharge = 0
+    nearby = await find_nearby_shops(db, req.pickup_lat, req.pickup_lng, radius_m=5000)
+    if nearby:
+        distance_km = round(nearby[0]["distance_m"] / 1000, 3)
+        dist_row = await db.execute(
+            text("""
+                SELECT surcharge FROM distance_pricing
+                WHERE is_active = true
+                  AND min_km <= :km
+                  AND (max_km IS NULL OR max_km > :km)
+                ORDER BY min_km DESC
+                LIMIT 1
+            """),
+            {"km": distance_km},
+        )
+        dist_result = dist_row.fetchone()
+        if dist_result:
+            distance_surcharge = dist_result.surcharge
+
+    # 날씨 + 거리 적용된 기준 금액
+    adjusted_base = weather_amount + distance_surcharge
+
+    discount = await _apply_coupon(db, req.coupon_id, adjusted_base, current_user.id) if req.coupon_id else 0
+    after_coupon = adjusted_base - discount
 
     points_used = 0
     point_balance = 0
@@ -275,32 +307,40 @@ async def create_order(
                 pickup_address,  pickup_location,
                 delivery_address, delivery_location,
                 base_amount, discount_amount, total_amount,
-                platform_fee, coupon_id, customer_note, points_used
+                platform_fee, coupon_id, customer_note, points_used,
+                weather_condition, weather_multiplier,
+                distance_km, distance_surcharge
             ) VALUES (
                 :customer_id, CAST(:service_type AS service_type), :wash_category,
                 :pickup_address,  ST_SetSRID(ST_MakePoint(:pickup_lng, :pickup_lat), 4326),
                 :delivery_address, ST_SetSRID(ST_MakePoint(:delivery_lng, :delivery_lat), 4326),
                 :base_amount, :total_discount, :total,
-                1000, :coupon_id, :note, :points_used
+                1000, :coupon_id, :note, :points_used,
+                :weather_condition, :weather_multiplier,
+                :distance_km, :distance_surcharge
             )
             RETURNING id, deadline_at
         """),
         {
-            "customer_id":    current_user.id,
-            "service_type":   req.service_type,
-            "wash_category":  req.wash_category,
-            "pickup_address": req.pickup_address,
-            "pickup_lat":     req.pickup_lat,
-            "pickup_lng":     req.pickup_lng,
-            "delivery_address": req.delivery_address,
-            "delivery_lat":   req.delivery_lat,
-            "delivery_lng":   req.delivery_lng,
-            "base_amount":    base_amount,
-            "total_discount": discount + points_used,
-            "total":          total,
-            "coupon_id":      req.coupon_id,
-            "note":           req.customer_note,
-            "points_used":    points_used,
+            "customer_id":        current_user.id,
+            "service_type":       req.service_type,
+            "wash_category":      req.wash_category,
+            "pickup_address":     req.pickup_address,
+            "pickup_lat":         req.pickup_lat,
+            "pickup_lng":         req.pickup_lng,
+            "delivery_address":   req.delivery_address,
+            "delivery_lat":       req.delivery_lat,
+            "delivery_lng":       req.delivery_lng,
+            "base_amount":        base_amount,
+            "total_discount":     discount + points_used,
+            "total":              total,
+            "coupon_id":          req.coupon_id,
+            "note":               req.customer_note,
+            "points_used":        points_used,
+            "weather_condition":  weather_condition if weather_condition != "NONE" else None,
+            "weather_multiplier": weather_multiplier,
+            "distance_km":        distance_km,
+            "distance_surcharge": distance_surcharge,
         }
     )
     row = result.fetchone()
@@ -344,7 +384,22 @@ async def create_order(
         )
     )
 
-    return {"order_id": row.id, "deadline_at": row.deadline_at, "total_amount": total}
+    return {
+        "order_id":    row.id,
+        "deadline_at": row.deadline_at,
+        "total_amount": total,
+        "price_breakdown": {
+            "base_amount":        base_amount,
+            "weather_condition":  weather_condition,
+            "weather_multiplier": weather_multiplier,
+            "weather_surcharge":  weather_amount - base_amount,
+            "distance_km":        distance_km,
+            "distance_surcharge": distance_surcharge,
+            "coupon_discount":    discount,
+            "points_used":        points_used,
+            "total":              total,
+        },
+    }
 
 
 @router.post("/{order_id}/cancel")
@@ -602,6 +657,117 @@ async def get_order(
     if not row:
         raise HTTPException(404, "주문을 찾을 수 없습니다")
     return dict(row._mapping)
+
+
+class RejectOrderRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+async def _record_penalty(
+    db: AsyncSession,
+    shop_id: str,
+    order_id,
+    penalty_type: str,
+    penalty_point: int,
+    description: str,
+) -> None:
+    """패널티 기록 + 누적 점수 반영 (10점 초과 시 자동 정지)"""
+    await db.execute(
+        text("""
+            INSERT INTO partner_penalties (shop_id, order_id, penalty_type, penalty_point, description)
+            VALUES (:shop_id, :order_id, :ptype, :point, :desc)
+        """),
+        {
+            "shop_id":  shop_id,
+            "order_id": order_id,
+            "ptype":    penalty_type,
+            "point":    penalty_point,
+            "desc":     description,
+        },
+    )
+    await db.execute(
+        text("""
+            UPDATE shops
+            SET penalty_score = penalty_score + :point,
+                -- 누적 10점 초과 시 자동 영업 정지
+                penalty_suspended = CASE WHEN penalty_score + :point >= 10 THEN true ELSE penalty_suspended END,
+                is_available      = CASE WHEN penalty_score + :point >= 10 THEN false ELSE is_available END
+            WHERE id = :shop_id
+        """),
+        {"point": penalty_point, "shop_id": shop_id},
+    )
+
+
+@router.post("/{order_id}/reject")
+async def reject_order(
+    order_id: UUID,
+    req: RejectOrderRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("PARTNER")),
+):
+    """
+    점주 주문 거절 — PENDING 상태만 가능.
+    거절 시 패널티 1점 부과, 누적 10점 시 자동 영업 정지.
+    """
+    result = await db.execute(
+        text("""
+            SELECT o.id, o.status::text, o.customer_id,
+                   o.ordered_at, s.id AS shop_id, u.fcm_token
+            FROM orders o
+            JOIN shops s  ON s.owner_id = :uid
+            JOIN users u  ON u.id = o.customer_id
+            WHERE o.id = :oid
+        """),
+        {"oid": order_id, "uid": current_user.id},
+    )
+    order = result.fetchone()
+    if not order:
+        raise HTTPException(404, "주문을 찾을 수 없습니다")
+    if order.status != "PENDING":
+        raise HTTPException(400, "대기 중인 주문만 거절할 수 있습니다")
+
+    await db.execute(
+        text("""
+            UPDATE orders
+            SET rejected_at = NOW(), reject_reason = :reason, updated_at = NOW()
+            WHERE id = :id
+        """),
+        {"reason": req.reason or "점주 거절", "id": order_id},
+    )
+
+    # 패널티: 거절 1점
+    await _record_penalty(
+        db, str(order.shop_id), order_id,
+        penalty_type="REJECTION",
+        penalty_point=1,
+        description=f"주문 거절: {req.reason or '사유 없음'}",
+    )
+
+    # 수락 지연 패널티 추가 확인 (30분 초과 시 LATE_ACCEPT 1점 추가)
+    from datetime import datetime as dt, timezone as tz
+    ordered_at = order.ordered_at
+    if ordered_at.tzinfo is None:
+        ordered_at = ordered_at.replace(tzinfo=tz.utc)
+    elapsed_min = (dt.now(tz.utc) - ordered_at).total_seconds() / 60
+    if elapsed_min > 30:
+        await _record_penalty(
+            db, str(order.shop_id), order_id,
+            penalty_type="LATE_ACCEPT",
+            penalty_point=1,
+            description=f"수락 지연 {int(elapsed_min)}분 후 거절",
+        )
+
+    await db.commit()
+
+    # 고객에게 알림
+    asyncio.create_task(
+        send_customer_status_notification(
+            str(order.customer_id), order.fcm_token, str(order_id),
+            "주문 거절 ❌", "다른 점주가 배정될 예정입니다. 잠시 기다려 주세요.",
+        )
+    )
+
+    return {"success": True, "message": "주문이 거절되었습니다"}
 
 
 async def _apply_coupon(db, coupon_id, base_amount, user_id) -> int:
