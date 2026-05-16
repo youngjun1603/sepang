@@ -523,11 +523,16 @@ async def update_order_status(
         if not accepted.scalar():
             raise HTTPException(409, "이미 다른 점주가 수락한 주문입니다")
         await db.commit()
-        if "ACCEPTED" in _CUSTOMER_NOTIFY:
-            title, body = _CUSTOMER_NOTIFY["ACCEPTED"]
-            asyncio.create_task(
-                send_customer_status_notification(str(order.customer_id), order.fcm_token, str(order_id), title, body)
+        accepted_body = (
+            "점주 확인 완료 — 이제 앱에서 주문 취소가 불가능합니다. "
+            "취소가 필요하신 경우 점주에게 직접 연락하여 주문 취소를 요청해 주세요."
+        )
+        asyncio.create_task(
+            send_customer_status_notification(
+                str(order.customer_id), order.fcm_token, str(order_id),
+                "수락 완료 ✅ — 취소 불가", accepted_body,
             )
+        )
         asyncio.create_task(
             _sms_order_event(str(order.customer_id), f"[세팡] 점주가 주문을 수락했습니다. 곧 수거 예정이에요 (#{str(order_id)[-6:].upper()})")
         )
