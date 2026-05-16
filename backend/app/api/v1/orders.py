@@ -139,26 +139,62 @@ async def _sms_order_event(customer_id: str, message: str) -> None:
 
 # ── 공통 취소 로직 ─────────────────────────────────────────────────────────────
 
-async def _do_cancel_order(db: AsyncSession, order, reason: str) -> None:
-    """주문 취소 + 쿠폰/포인트 복원 + Toss 환불 (결제 완료 시)"""
+async def _do_cancel_order(
+    db: AsyncSession,
+    order,
+    reason: str,
+    cancel_body: str = "주문이 취소되었습니다.",
+) -> None:
+    """
+    주문 취소 + 쿠폰/포인트 복원 + Toss 환불 (결제 완료 시).
+    Toss 환불을 DB 커밋 전에 먼저 수행 — 환불 실패 시 DB 변경 없음.
+    """
     oid = order.id
+    payment_status = getattr(order, "payment_status", None)
+    payment_key    = getattr(order, "payment_key", None)
 
+    # ── 1. Toss 환불 먼저 (결제된 경우) — 실패 시 DB 변경 없이 에러 반환 ──
+    toss_refunded = False
+    if payment_status == "PAID" and payment_key:
+        if not settings.TOSS_SECRET_KEY:
+            raise HTTPException(503, "결제 취소 서비스가 설정되지 않았습니다")
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"https://api.tosspayments.com/v1/payments/{payment_key}/cancel",
+                headers=_toss_headers(),
+                json={"cancelReason": reason},
+            )
+        toss_data = resp.json()
+        if resp.status_code != 200:
+            raise HTTPException(400, toss_data.get("message", "결제 취소에 실패했습니다"))
+        toss_refunded = True
+
+    # ── 2. 주문 상태 업데이트 (환불 확정 후) ─────────────────────────
+    payment_col = ", payment_status = 'REFUNDED'" if toss_refunded else ""
     await db.execute(
-        text("""
+        text(f"""
             UPDATE orders
             SET status = 'CANCELLED', cancelled_at = NOW(),
                 cancel_reason = :reason, updated_at = NOW()
+                {payment_col}
             WHERE id = :id
         """),
         {"reason": reason, "id": oid},
     )
+    if toss_refunded:
+        await db.execute(
+            text("UPDATE payment_transactions SET status = 'REFUNDED', cancel_reason = :r, updated_at = NOW() WHERE order_id = :oid"),
+            {"r": reason, "oid": oid},
+        )
 
+    # ── 3. 쿠폰 복원 ──────────────────────────────────────────────
     if order.coupon_id:
         await db.execute(
             text("UPDATE user_coupons SET used_at = NULL, order_id = NULL WHERE coupon_id = :cid AND user_id = :uid"),
             {"cid": order.coupon_id, "uid": order.customer_id},
         )
 
+    # ── 4. 포인트 복원 ─────────────────────────────────────────────
     points_used = getattr(order, "points_used", 0) or 0
     if points_used > 0:
         bal_row = await db.execute(
@@ -174,28 +210,9 @@ async def _do_cancel_order(db: AsyncSession, order, reason: str) -> None:
             {"uid": order.customer_id, "amt": points_used, "bal": cur_bal + points_used, "oid": oid},
         )
 
-    payment_status = getattr(order, "payment_status", None)
-    payment_key    = getattr(order, "payment_key", None)
-    if payment_status == "PAID" and payment_key and settings.TOSS_SECRET_KEY:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"https://api.tosspayments.com/v1/payments/{payment_key}/cancel",
-                headers=_toss_headers(),
-                json={"cancelReason": reason},
-            )
-        if resp.status_code == 200:
-            await db.execute(
-                text("UPDATE orders SET payment_status = 'REFUNDED' WHERE id = :id"),
-                {"id": oid},
-            )
-            await db.execute(
-                text("UPDATE payment_transactions SET status = 'REFUNDED', cancel_reason = :r, updated_at = NOW() WHERE order_id = :oid"),
-                {"r": reason, "oid": oid},
-            )
-
     await db.commit()
 
-    # 취소 알림: 고객 + 점주 (담당 점포가 있을 때)
+    # ── 5. 알림 — 고객 + 점주 (담당 점포가 있을 때) ──────────────
     notif_rows = await db.execute(
         text("""
             SELECT
@@ -213,11 +230,10 @@ async def _do_cancel_order(db: AsyncSession, order, reason: str) -> None:
     )
     notif = notif_rows.fetchone()
     if notif:
-        cancel_title = "주문 취소 ❌"
         asyncio.create_task(
             send_customer_status_notification(
                 notif.customer_id, notif.customer_fcm, str(oid),
-                cancel_title, "주문이 취소되었습니다.",
+                "주문 취소 ❌", cancel_body,
             )
         )
         if notif.partner_fcm:
@@ -465,7 +481,14 @@ async def partner_cancel_order(
     if order.status not in PARTNER_CANCELLABLE:
         raise HTTPException(400, "수락 또는 수거 완료 상태의 주문만 취소할 수 있습니다")
 
-    await _do_cancel_order(db, order, f"점주 취소 — {req.cancel_reason}")
+    await _do_cancel_order(
+        db, order,
+        reason=f"점주 취소 — {req.cancel_reason}",
+        cancel_body=(
+            "점주가 고객 요청에 따라 주문을 취소했습니다. "
+            "결제하신 금액은 영업일 기준 3~5일 내 환불됩니다."
+        ),
+    )
     return {"success": True}
 
 
@@ -572,17 +595,31 @@ async def upload_order_photo(
     db:         AsyncSession = Depends(get_db),
     current_user = Depends(require_role("PARTNER")),
 ):
+    VALID_PHOTO_TYPES = {"PICKUP", "DELIVERY"}
+    if photo_type.upper() not in VALID_PHOTO_TYPES:
+        raise HTTPException(400, f"유효하지 않은 사진 유형입니다. 허용값: {', '.join(VALID_PHOTO_TYPES)}")
+
     allowed_types = {"image/jpeg", "image/png"}
     if file.content_type not in allowed_types:
         raise HTTPException(400, "JPEG 또는 PNG 파일만 업로드할 수 있습니다")
 
-    if file.size > 10 * 1024 * 1024:
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
         raise HTTPException(413, "파일 크기는 10MB 이하여야 합니다")
+
+    # 담당 주문 소유권 검증
+    order_row = await db.execute(
+        text("SELECT shop_id FROM orders WHERE id = :id"),
+        {"id": order_id},
+    )
+    order_rec = order_row.fetchone()
+    if not order_rec:
+        raise HTTPException(404, "주문을 찾을 수 없습니다")
+    if not order_rec.shop_id or str(order_rec.shop_id) != str(current_user.shop_id):
+        raise HTTPException(403, "담당 주문에만 사진을 업로드할 수 있습니다")
 
     ext = "jpg" if file.content_type == "image/jpeg" else "png"
     storage_path = f"photos/{order_id}/{photo_type.lower()}/{int(datetime.now(timezone.utc).timestamp())}.{ext}"
-
-    content = await file.read()
 
     def _upload():
         sb = _get_supabase()
@@ -686,20 +723,25 @@ async def get_order(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    result = await db.execute(
-        text("""
-            SELECT id, customer_id, shop_id, service_type::text, wash_category::text,
-                   status::text, pickup_address, delivery_address,
-                   total_amount, platform_fee, ordered_at, deadline_at,
-                   picked_up_at, completed_at, customer_note
-            FROM orders
-            WHERE id = :id
+    base_select = """
+        SELECT id, customer_id, shop_id, service_type::text, wash_category::text,
+               status::text, pickup_address, delivery_address,
+               total_amount, platform_fee, ordered_at, deadline_at,
+               picked_up_at, completed_at, customer_note
+        FROM orders
+        WHERE id = :id
+    """
+    if current_user.role == "ADMIN":
+        result = await db.execute(text(base_select), {"id": order_id})
+    else:
+        result = await db.execute(
+            text(base_select + """
               AND (customer_id = :uid OR shop_id IN (
                   SELECT id FROM shops WHERE owner_id = :uid
               ))
-        """),
-        {"id": order_id, "uid": current_user.id},
-    )
+            """),
+            {"id": order_id, "uid": current_user.id},
+        )
     row = result.fetchone()
     if not row:
         raise HTTPException(404, "주문을 찾을 수 없습니다")
@@ -763,8 +805,11 @@ async def reject_order(
 
     result = await db.execute(
         text("""
-            SELECT o.id, o.status::text, o.customer_id,
-                   o.ordered_at, u.fcm_token
+            SELECT o.id, o.status::text, o.customer_id, o.ordered_at,
+                   o.wash_category, o.total_amount,
+                   ST_Y(o.pickup_location::geometry) AS pickup_lat,
+                   ST_X(o.pickup_location::geometry) AS pickup_lng,
+                   u.fcm_token
             FROM orders o
             JOIN users u ON u.id = o.customer_id
             WHERE o.id = :oid
@@ -812,13 +857,25 @@ async def reject_order(
 
     await db.commit()
 
-    # 고객에게 알림
+    # 고객에게 거절 알림
     asyncio.create_task(
         send_customer_status_notification(
             str(order.customer_id), order.fcm_token, str(order_id),
             "주문 거절 ❌", "다른 점주가 배정될 예정입니다. 잠시 기다려 주세요.",
         )
     )
+
+    # 주변 다른 점주에게 재알림 (해당 점주 제외하고 반경 내 재발송)
+    if order.pickup_lat and order.pickup_lng:
+        asyncio.create_task(
+            send_nearby_partner_notifications(
+                order_id=str(order_id),
+                pickup_lat=order.pickup_lat,
+                pickup_lng=order.pickup_lng,
+                wash_category=order.wash_category,
+                total_amount=order.total_amount,
+            )
+        )
 
     return {"success": True, "message": "주문이 거절되었습니다"}
 
