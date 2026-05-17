@@ -93,6 +93,8 @@ class AdminShop(BaseModel):
     rating: float
     is_active: bool
     is_available: bool
+    penalty_score: int
+    penalty_suspended: bool
 
 
 class AdminSettlement(BaseModel):
@@ -292,6 +294,7 @@ async def list_shops(
             s.id::text, s.name,
             COALESCE(SPLIT_PART(s.address, ' ', 2), s.address) AS region,
             s.team_type::text, s.rating, s.is_active, s.is_available,
+            s.penalty_score, s.penalty_suspended,
             COUNT(o.id) FILTER (WHERE o.ordered_at::date = CURRENT_DATE) AS today_orders
         FROM shops s
         LEFT JOIN orders o ON o.shop_id = s.id
@@ -305,6 +308,7 @@ async def list_shops(
             id=r.id, name=r.name, region=r.region,
             team_type=r.team_type, today_orders=r.today_orders or 0,
             rating=float(r.rating or 0), is_active=r.is_active, is_available=r.is_available,
+            penalty_score=r.penalty_score or 0, penalty_suspended=r.penalty_suspended or False,
         )
         for r in rows.fetchall()
     ]
@@ -373,6 +377,130 @@ async def create_shop(
     await db.commit()
     await _audit(db, request, current_user, f"점포 등록: {body.name} ({body.business_number})")
     return {"id": str(shop_id), "name": body.name, "lat": lat, "lng": lng}
+
+
+@router.delete("/shops/{shop_id}", status_code=204)
+async def delete_shop(
+    shop_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    """점포 삭제 — 진행 중 주문 있으면 거부, 파트너 계정도 함께 삭제"""
+    active = await db.execute(
+        text("SELECT id FROM orders WHERE shop_id = :id AND status NOT IN ('COMPLETED','CANCELLED') LIMIT 1"),
+        {"id": shop_id},
+    )
+    if active.fetchone():
+        raise HTTPException(400, "진행 중인 주문이 있어 삭제할 수 없습니다")
+
+    row = await db.execute(
+        text("DELETE FROM shops WHERE id = :id RETURNING id, name, owner_id"),
+        {"id": shop_id},
+    )
+    shop = row.fetchone()
+    if not shop:
+        raise HTTPException(404, "점포를 찾을 수 없습니다")
+
+    await db.execute(
+        text("DELETE FROM users WHERE id = :id AND role = 'PARTNER'"),
+        {"id": shop.owner_id},
+    )
+    await db.commit()
+    await _audit(db, request, current_user, f"점포 삭제: {shop.name} ({shop_id})")
+
+
+# ── 쿠폰 관리 ────────────────────────────────────────────────────────────────
+
+class CreateCouponRequest(BaseModel):
+    code:             str            = Field(..., min_length=2, max_length=20)
+    name:             str            = Field(..., min_length=2, max_length=100)
+    discount_amount:  Optional[int]  = Field(None, ge=0)
+    discount_rate:    Optional[float]= Field(None, ge=0.0, le=1.0)
+    min_order_amount: int            = Field(0, ge=0)
+    expires_at:       Optional[str]  = None
+
+
+@router.get("/coupons")
+async def list_coupons(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    """쿠폰 목록 조회 (관리자)"""
+    rows = await db.execute(text("""
+        SELECT id::text, code, name, discount_amount, discount_rate,
+               min_order_amount, expires_at::text,
+               COUNT(uc.id) AS issued_count,
+               COUNT(uc.id) FILTER (WHERE uc.used_at IS NOT NULL) AS used_count
+        FROM coupons c
+        LEFT JOIN user_coupons uc ON uc.coupon_id = c.id
+        GROUP BY c.id
+        ORDER BY c.created_at DESC
+    """))
+    return [dict(r._mapping) for r in rows.fetchall()]
+
+
+@router.post("/coupons", status_code=201)
+async def create_coupon(
+    req: CreateCouponRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    """쿠폰 생성"""
+    if not req.discount_amount and not req.discount_rate:
+        raise HTTPException(400, "discount_amount 또는 discount_rate 중 하나는 필수입니다")
+
+    dup = await db.execute(text("SELECT id FROM coupons WHERE code = :code"), {"code": req.code.upper()})
+    if dup.fetchone():
+        raise HTTPException(409, f"이미 존재하는 쿠폰 코드입니다: {req.code}")
+
+    row = await db.execute(
+        text("""
+            INSERT INTO coupons (code, name, discount_amount, discount_rate, min_order_amount, expires_at)
+            VALUES (:code, :name, :damount, :drate, :min_amt, CAST(:expires_at AS timestamptz))
+            RETURNING id::text, code, name
+        """),
+        {
+            "code":       req.code.upper(),
+            "name":       req.name,
+            "damount":    req.discount_amount,
+            "drate":      req.discount_rate,
+            "min_amt":    req.min_order_amount,
+            "expires_at": req.expires_at,
+        },
+    )
+    result = row.fetchone()
+    await db.commit()
+    await _audit(db, request, current_user, f"쿠폰 생성: {req.code}")
+    return {"id": result.id, "code": result.code, "name": result.name}
+
+
+@router.delete("/coupons/{coupon_id}", status_code=204)
+async def delete_coupon(
+    coupon_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    """쿠폰 삭제 — 사용된 쿠폰이 있으면 거부"""
+    used = await db.execute(
+        text("SELECT id FROM user_coupons WHERE coupon_id = :id AND used_at IS NOT NULL LIMIT 1"),
+        {"id": coupon_id},
+    )
+    if used.fetchone():
+        raise HTTPException(400, "이미 사용된 쿠폰이 있어 삭제할 수 없습니다")
+
+    row = await db.execute(
+        text("DELETE FROM coupons WHERE id = :id RETURNING id, code"),
+        {"id": coupon_id},
+    )
+    coupon = row.fetchone()
+    if not coupon:
+        raise HTTPException(404, "쿠폰을 찾을 수 없습니다")
+    await db.commit()
+    await _audit(db, request, current_user, f"쿠폰 삭제: {coupon.code}")
 
 
 @router.get("/sla-at-risk")

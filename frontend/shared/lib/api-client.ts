@@ -231,6 +231,26 @@ export const adminApi = {
     apiFetch<{ success: boolean }>(`/api/v1/admin/shops/${shopId}/active`, {
       method: "PATCH", body: JSON.stringify({ is_active: isActive }),
     }),
+
+  deleteShop: (shopId: string) =>
+    apiFetch<void>(`/api/v1/admin/shops/${shopId}`, { method: "DELETE" }),
+
+  suspendShop: (shopId: string) =>
+    apiFetch<{ success: boolean }>(`/api/v1/admin/penalties/${shopId}/suspend`, { method: "POST" }),
+
+  unsuspendShop: (shopId: string) =>
+    apiFetch<{ success: boolean }>(`/api/v1/admin/penalties/${shopId}/unsuspend`, { method: "POST" }),
+
+  listCoupons: () =>
+    apiFetch<AdminCoupon[]>("/api/v1/admin/coupons"),
+
+  createCoupon: (data: CreateCouponInput) =>
+    apiFetch<{ id: string; code: string; name: string }>("/api/v1/admin/coupons", {
+      method: "POST", body: JSON.stringify(data),
+    }),
+
+  deleteCoupon: (id: string) =>
+    apiFetch<void>(`/api/v1/admin/coupons/${id}`, { method: "DELETE" }),
 };
 
 // ── 리뷰 API ─────────────────────────────────────────────────────────────────
@@ -388,6 +408,20 @@ export interface Settlement {
 export interface Shop {
   id: string; name: string; region: string; team_type: string;
   today_orders: number; rating: number; is_active: boolean; is_available: boolean;
+  penalty_score: number; penalty_suspended: boolean;
+}
+
+export interface AdminCoupon {
+  id: string; code: string; name: string;
+  discount_amount?: number; discount_rate?: number;
+  min_order_amount: number; expires_at?: string;
+  issued_count: number; used_count: number;
+}
+
+export interface CreateCouponInput {
+  code: string; name: string;
+  discount_amount?: number; discount_rate?: number;
+  min_order_amount?: number; expires_at?: string;
 }
 
 export interface CreateShopInput {

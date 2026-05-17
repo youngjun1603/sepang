@@ -286,8 +286,10 @@ function LoginPage() {
           </button>
           <button style={{width:"100%",background:"transparent",border:"none",color:"#444",fontSize:12,cursor:"pointer",padding:8}} onClick={()=>{setStep(0);setError("");}}>← 뒤로</button>
         </>)}
-        <div style={{marginTop:18,padding:11,background:"#070707",borderRadius:9,border:"1px solid #1a1a1a",fontSize:10,color:"#2a2a2a",lineHeight:1.8}}>
-          • VPN 연결 필수 (10.0.0.0/8)<br/>• 5회 실패 시 계정 잠금<br/>• 모든 접근 감사 로그 기록
+        <div style={{marginTop:18,padding:"11px 13px",background:"#0d1117",borderRadius:9,border:"1px solid #30363d",fontSize:11,lineHeight:2}}>
+          <div style={{color:"#f0a500"}}>⚠ VPN 연결 필수 (10.0.0.0/8)</div>
+          <div style={{color:"#cf6679"}}>⊘ 5회 실패 시 계정 잠금</div>
+          <div style={{color:"#8b949e"}}>☰ 모든 접근 감사 로그 기록</div>
         </div>
       </div>
     </div></>
@@ -438,6 +440,33 @@ function ShopsPage() {
     }
   };
 
+  const handleDelete = async (shop) => {
+    if (!window.confirm(`'${shop.name}'을 영구 삭제하시겠습니까?\n파트너 계정도 함께 삭제됩니다.\n이 작업은 되돌릴 수 없습니다.`)) return;
+    try {
+      await adminApi.deleteShop(shop.id);
+      setShopToast(`'${shop.name}' 삭제 완료`);
+      setTimeout(() => setShopToast(null), 2500);
+      reload();
+    } catch (e) {
+      alert(e.message || "삭제에 실패했습니다");
+    }
+  };
+
+  const handleSuspend = async (shop) => {
+    const isSuspended = shop.penalty_suspended;
+    const label = isSuspended ? "영업정지 해제" : "영업정지";
+    if (!window.confirm(`'${shop.name}'을 ${label}하시겠습니까?`)) return;
+    try {
+      if (isSuspended) await adminApi.unsuspendShop(shop.id);
+      else await adminApi.suspendShop(shop.id);
+      setShopToast(`'${shop.name}' ${label} 완료`);
+      setTimeout(() => setShopToast(null), 2500);
+      reload();
+    } catch (e) {
+      alert(e.message || "처리에 실패했습니다");
+    }
+  };
+
   const totals = shops ? {
     total: shops.length,
     day: shops.filter(s => s.team_type === "DAY").length,
@@ -482,7 +511,7 @@ function ShopsPage() {
           <button className="btn btn-primary" onClick={() => { setForm(EMPTY_SHOP); setFormError(""); setShowForm(true); }}>+ 점포 등록</button>
         </div>
         {loading ? <Spinner/> : error ? <ErrorBox msg={error}/> :
-          <table className="tbl"><thead><tr><th>점포명</th><th>지역</th><th>팀</th><th>오늘</th><th>평점</th><th>상태</th><th></th></tr></thead>
+          <table className="tbl"><thead><tr><th>점포명</th><th>지역</th><th>팀</th><th>오늘</th><th>평점</th><th>패널티</th><th>상태</th><th></th></tr></thead>
           <tbody>{(shops??[]).map((s,i)=>(
             <tr key={i}>
               <td style={{fontWeight:600}}>{s.name}</td>
@@ -490,11 +519,24 @@ function ShopsPage() {
               <td><span className={`badge ${s.team_type==="NIGHT"?"ab-purple":s.team_type==="BOTH"?"ab-blue":"ab-yellow"}`}>{s.team_type}</span></td>
               <td style={{fontFamily:"'Syne',sans-serif",fontWeight:700}}>{s.today_orders}건</td>
               <td>⭐ {s.rating?.toFixed(1)}</td>
-              <td><span className={`badge ${s.is_active?"ab-green":"ab-gray"}`}>{s.is_active?"운영중":"휴식"}</span></td>
               <td>
+                <span style={{fontWeight:700,color:s.penalty_suspended?"#FF3D00":s.penalty_score>=7?"#E65100":s.penalty_score>=4?"#B07800":"#888",fontSize:11}}>
+                  {s.penalty_suspended ? "🚫 정지" : `${s.penalty_score??0}점`}
+                </span>
+              </td>
+              <td><span className={`badge ${s.is_active?"ab-green":"ab-gray"}`}>{s.is_active?"운영중":"휴식"}</span></td>
+              <td style={{whiteSpace:"nowrap",display:"flex",gap:4}}>
                 <button onClick={()=>handleToggleActive(s)}
-                  style={{background:s.is_active?"#FFF3E0":"#E8F5E9",border:"none",borderRadius:6,padding:"3px 9px",fontSize:10,fontWeight:700,color:s.is_active?"#E65100":"#2E7D32",cursor:"pointer",whiteSpace:"nowrap"}}>
-                  {s.is_active?"비활성화":"활성화"}
+                  style={{background:s.is_active?"#FFF3E0":"#E8F5E9",border:"none",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:700,color:s.is_active?"#E65100":"#2E7D32",cursor:"pointer"}}>
+                  {s.is_active?"비활성":"활성화"}
+                </button>
+                <button onClick={()=>handleSuspend(s)}
+                  style={{background:s.penalty_suspended?"#E8F5E9":"#FFF0ED",border:"none",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:700,color:s.penalty_suspended?"#2E7D32":"#C62828",cursor:"pointer"}}>
+                  {s.penalty_suspended?"정지해제":"영업정지"}
+                </button>
+                <button onClick={()=>handleDelete(s)}
+                  style={{background:"#FFF0ED",border:"1px solid #FFCDD2",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:700,color:"#C62828",cursor:"pointer"}}>
+                  삭제
                 </button>
               </td>
             </tr>
@@ -672,8 +714,47 @@ function LogsPage() {
   );
 }
 
+const EMPTY_COUPON = { code:"", name:"", discount_amount:"", discount_rate:"", min_order_amount:"0", expires_at:"" };
+
 function MarketingPage() {
   const { data: stats, loading, error } = useApi(() => adminApi.marketing(), []);
+  const { data: coupons, reload: reloadCoupons } = useApi(() => adminApi.listCoupons(), []);
+  const [couponModal, setCouponModal] = useState(false);
+  const [couponForm, setCouponForm] = useState(EMPTY_COUPON);
+  const [couponSaving, setCouponSaving] = useState(false);
+  const [couponToast, setCouponToast] = useState(null);
+
+  const showCouponToast = (msg) => { setCouponToast(msg); setTimeout(()=>setCouponToast(null),2500); };
+
+  const handleCreateCoupon = async () => {
+    if (!couponForm.code || !couponForm.name) { showCouponToast("코드와 이름은 필수입니다"); return; }
+    if (!couponForm.discount_amount && !couponForm.discount_rate) { showCouponToast("할인금액 또는 할인율 중 하나는 필수입니다"); return; }
+    setCouponSaving(true);
+    try {
+      await adminApi.createCoupon({
+        code: couponForm.code,
+        name: couponForm.name,
+        discount_amount: couponForm.discount_amount ? Number(couponForm.discount_amount) : undefined,
+        discount_rate: couponForm.discount_rate ? Number(couponForm.discount_rate) / 100 : undefined,
+        min_order_amount: Number(couponForm.min_order_amount) || 0,
+        expires_at: couponForm.expires_at || undefined,
+      });
+      setCouponModal(false);
+      setCouponForm(EMPTY_COUPON);
+      showCouponToast("쿠폰이 생성되었습니다");
+      reloadCoupons();
+    } catch(e) { showCouponToast(e.message || "오류가 발생했습니다"); }
+    finally { setCouponSaving(false); }
+  };
+
+  const handleDeleteCoupon = async (c) => {
+    if (!window.confirm(`'${c.name}' (${c.code}) 쿠폰을 삭제하시겠습니까?`)) return;
+    try {
+      await adminApi.deleteCoupon(c.id);
+      showCouponToast("쿠폰이 삭제되었습니다");
+      reloadCoupons();
+    } catch(e) { showCouponToast(e.message || "삭제에 실패했습니다"); }
+  };
 
   const fcmRate = stats && stats.total_customers > 0
     ? Math.round(stats.fcm_opt_in / stats.total_customers * 100)
@@ -687,6 +768,7 @@ function MarketingPage() {
 
   return (
     <Layout title="마케팅/CRM"><style>{CSS}</style>
+      {couponToast && <div style={{position:"fixed",top:20,right:20,background:"#1a1a1a",color:"white",padding:"10px 18px",borderRadius:10,fontSize:13,zIndex:9999}}>{couponToast}</div>}
       {loading ? <Spinner/> : error ? <ErrorBox msg={error}/> : <>
         {/* 고객 현황 KPI */}
         <div className="kpi-grid" style={{gridTemplateColumns:"repeat(4,1fr)"}}>
@@ -745,28 +827,41 @@ function MarketingPage() {
           </div>
         </div>
 
-        {/* 쿠폰 사용 현황 */}
+        {/* 쿠폰 관리 */}
         <div className="card">
-          <div className="card-title">쿠폰 사용 현황</div>
-          {(!stats?.coupons || stats.coupons.length === 0)
+          <div className="card-title">
+            쿠폰 관리
+            <button className="btn btn-primary" onClick={()=>{setCouponForm(EMPTY_COUPON);setCouponModal(true);}}>+ 쿠폰 추가</button>
+          </div>
+          {(!coupons || coupons.length === 0)
             ? <div style={{color:"#888",fontSize:12,padding:"16px 0",textAlign:"center"}}>등록된 쿠폰이 없습니다</div>
             : <table className="tbl">
-                <thead><tr><th>코드</th><th>쿠폰명</th><th>발급</th><th>사용</th><th>사용률</th></tr></thead>
-                <tbody>{stats.coupons.map((c,i)=>{
+                <thead><tr><th>코드</th><th>쿠폰명</th><th>할인</th><th>최소주문</th><th>만료일</th><th>발급</th><th>사용</th><th>사용률</th><th></th></tr></thead>
+                <tbody>{coupons.map((c,i)=>{
                   const rate = c.issued_count > 0 ? Math.round(c.used_count / c.issued_count * 100) : 0;
+                  const discount = c.discount_amount ? `${c.discount_amount.toLocaleString()}원` : c.discount_rate ? `${Math.round(c.discount_rate*100)}%` : "-";
                   return (
                     <tr key={i}>
                       <td style={{fontFamily:"monospace",fontWeight:700,color:"#0057FF"}}>{c.code}</td>
                       <td style={{fontWeight:600}}>{c.name}</td>
-                      <td>{c.issued_count.toLocaleString()}건</td>
-                      <td style={{fontWeight:700}}>{c.used_count.toLocaleString()}건</td>
+                      <td style={{fontWeight:700}}>{discount}</td>
+                      <td style={{fontSize:11,color:"#888"}}>{c.min_order_amount > 0 ? `${c.min_order_amount.toLocaleString()}원 이상` : "제한없음"}</td>
+                      <td style={{fontSize:11,color:"#888"}}>{c.expires_at ? c.expires_at.slice(0,10) : "무기한"}</td>
+                      <td>{c.issued_count}건</td>
+                      <td style={{fontWeight:700}}>{c.used_count}건</td>
                       <td>
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
-                          <div style={{flex:1,height:6,background:"#F0F0F0",borderRadius:3,overflow:"hidden"}}>
+                          <div style={{width:50,height:5,background:"#F0F0F0",borderRadius:3,overflow:"hidden"}}>
                             <div style={{height:"100%",width:`${rate}%`,background:rate>70?"#0057FF":rate>40?"#FFD600":"#E0E0E0",borderRadius:3}}/>
                           </div>
-                          <span style={{fontSize:10,fontWeight:700,width:28,textAlign:"right"}}>{rate}%</span>
+                          <span style={{fontSize:10,fontWeight:700}}>{rate}%</span>
                         </div>
+                      </td>
+                      <td>
+                        <button onClick={()=>handleDeleteCoupon(c)}
+                          style={{background:"#FFF0ED",border:"1px solid #FFCDD2",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:700,color:"#C62828",cursor:"pointer"}}>
+                          삭제
+                        </button>
                       </td>
                     </tr>
                   );
@@ -775,6 +870,58 @@ function MarketingPage() {
           }
         </div>
       </>}
+
+      {couponModal && (
+        <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setCouponModal(false)}>
+          <div className="modal fu">
+            <div className="modal-title">
+              🎟 쿠폰 추가
+              <button className="btn btn-ghost" onClick={()=>setCouponModal(false)} style={{fontSize:18,padding:"2px 8px",color:"#888"}}>✕</button>
+            </div>
+            <div className="form-row">
+              <label className="form-label">쿠폰 코드 * (대문자)</label>
+              <input className="form-input" placeholder="WELCOME3000" value={couponForm.code}
+                onChange={e=>setCouponForm(f=>({...f,code:e.target.value.toUpperCase()}))}/>
+            </div>
+            <div className="form-row">
+              <label className="form-label">쿠폰명 *</label>
+              <input className="form-input" placeholder="신규 가입 할인" value={couponForm.name}
+                onChange={e=>setCouponForm(f=>({...f,name:e.target.value}))}/>
+            </div>
+            <div className="form-row2">
+              <div className="form-row" style={{marginBottom:0}}>
+                <label className="form-label">할인금액 (원)</label>
+                <input className="form-input" type="number" placeholder="3000" value={couponForm.discount_amount}
+                  onChange={e=>setCouponForm(f=>({...f,discount_amount:e.target.value,discount_rate:""}))}/>
+              </div>
+              <div className="form-row" style={{marginBottom:0}}>
+                <label className="form-label">할인율 (%)</label>
+                <input className="form-input" type="number" min="1" max="100" placeholder="10" value={couponForm.discount_rate}
+                  onChange={e=>setCouponForm(f=>({...f,discount_rate:e.target.value,discount_amount:""}))}/>
+              </div>
+            </div>
+            <div style={{fontSize:10,color:"#888",marginBottom:10}}>* 할인금액 또는 할인율 중 하나만 입력</div>
+            <div className="form-row2">
+              <div className="form-row" style={{marginBottom:0}}>
+                <label className="form-label">최소 주문금액 (원)</label>
+                <input className="form-input" type="number" placeholder="0" value={couponForm.min_order_amount}
+                  onChange={e=>setCouponForm(f=>({...f,min_order_amount:e.target.value}))}/>
+              </div>
+              <div className="form-row" style={{marginBottom:0}}>
+                <label className="form-label">만료일 (비워두면 무기한)</label>
+                <input className="form-input" type="date" value={couponForm.expires_at}
+                  onChange={e=>setCouponForm(f=>({...f,expires_at:e.target.value}))}/>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:10,marginTop:18,justifyContent:"flex-end"}}>
+              <button type="button" className="btn btn-outline" onClick={()=>setCouponModal(false)} disabled={couponSaving}>취소</button>
+              <button type="button" className="btn btn-primary" onClick={handleCreateCoupon} disabled={couponSaving} style={{minWidth:90}}>
+                {couponSaving ? <span className="spinner"/> : "쿠폰 생성"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }
