@@ -31,7 +31,7 @@ jobs:
         with: { python-version: "3.12" }
 
       - name: Install migration deps
-        run: pip install alembic asyncpg sqlalchemy geoalchemy2 pydantic-settings
+        run: pip install alembic asyncpg sqlalchemy geoalchemy2 pydantic-settings bcrypt pyotp
 
       - name: Run Alembic migrations
         working-directory: backend
