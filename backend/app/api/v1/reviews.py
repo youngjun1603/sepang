@@ -80,12 +80,17 @@ async def create_review(
     review_id = review_row.id
 
     # 리뷰 포인트 적립 (+100P)
+    bal_row = await db.execute(
+        text("SELECT COALESCE(balance, 0) FROM point_transactions WHERE user_id = :uid ORDER BY id DESC LIMIT 1"),
+        {"uid": str(current_user.id)},
+    )
+    cur_bal = (bal_row.fetchone() or (0,))[0]
     await db.execute(
         text("""
-            INSERT INTO point_transactions (user_id, amount, reason)
-            VALUES (:uid, 100, '리뷰 작성')
+            INSERT INTO point_transactions (user_id, amount, balance, reason, order_id)
+            VALUES (:uid, 100, :bal, '리뷰 작성', :oid)
         """),
-        {"uid": str(current_user.id)}
+        {"uid": str(current_user.id), "bal": cur_bal + 100, "oid": str(req.order_id)},
     )
 
     # 샵 평점 및 리뷰 수 갱신

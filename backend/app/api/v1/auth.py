@@ -62,6 +62,9 @@ class AdminOTPRequest(BaseModel):
     temp_token: str   # 1단계 완료 임시 토큰
     otp_code:   str = Field(..., min_length=6, max_length=6)
 
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
 
 # ── JWT Helpers ────────────────────────────────────────────────────────────────
 
@@ -325,9 +328,9 @@ async def admin_verify_otp(req: AdminOTPRequest, request: Request, db: AsyncSess
 
 
 @router.post("/refresh")
-async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
+async def refresh_token(req: RefreshTokenRequest, db: AsyncSession = Depends(get_db)):
     try:
-        payload = jwt.decode(refresh_token, settings.JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(req.refresh_token, settings.JWT_SECRET, algorithms=[JWT_ALGORITHM])
         if payload.get("type") != "refresh":
             raise ValueError()
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, ValueError):

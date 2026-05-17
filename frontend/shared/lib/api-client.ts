@@ -79,8 +79,8 @@ async function refreshAccessToken(): Promise<boolean> {
   if (!refresh) return false;
   try {
     const data = await apiFetch<{ access_token: string }>(
-      `/api/v1/auth/refresh?refresh_token=${encodeURIComponent(refresh)}`,
-      { method: "POST", skipAuth: true }
+      "/api/v1/auth/refresh",
+      { method: "POST", body: JSON.stringify({ refresh_token: refresh }), skipAuth: true }
     );
     tokenStore.set(data.access_token, refresh);
     return true;

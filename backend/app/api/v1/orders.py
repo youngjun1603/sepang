@@ -564,12 +564,13 @@ async def update_order_status(
             "점주 확인 완료 — 이제 앱에서 주문 취소가 불가능합니다. "
             "취소가 필요하신 경우 점주에게 직접 연락하여 주문 취소를 요청해 주세요."
         )
-        asyncio.create_task(
-            send_customer_status_notification(
-                str(order.customer_id), order.fcm_token, str(order_id),
-                "수락 완료 ✅ — 취소 불가", accepted_body,
+        if order.fcm_token:
+            asyncio.create_task(
+                send_customer_status_notification(
+                    str(order.customer_id), order.fcm_token, str(order_id),
+                    "수락 완료 ✅ — 취소 불가", accepted_body,
+                )
             )
-        )
         asyncio.create_task(
             _sms_order_event(str(order.customer_id), f"[세팡] 점주가 주문을 수락했습니다. 곧 수거 예정이에요 (#{str(order_id)[-6:].upper()})")
         )
@@ -588,7 +589,7 @@ async def update_order_status(
     await db.commit()
 
     status_key = req.new_status.value
-    if status_key in _CUSTOMER_NOTIFY:
+    if status_key in _CUSTOMER_NOTIFY and order.fcm_token:
         title, body = _CUSTOMER_NOTIFY[status_key]
         asyncio.create_task(
             send_customer_status_notification(str(order.customer_id), order.fcm_token, str(order_id), title, body)
@@ -872,12 +873,13 @@ async def reject_order(
     await db.commit()
 
     # 고객에게 거절 알림
-    asyncio.create_task(
-        send_customer_status_notification(
-            str(order.customer_id), order.fcm_token, str(order_id),
-            "주문 거절 ❌", "다른 점주가 배정될 예정입니다. 잠시 기다려 주세요.",
+    if order.fcm_token:
+        asyncio.create_task(
+            send_customer_status_notification(
+                str(order.customer_id), order.fcm_token, str(order_id),
+                "주문 거절 ❌", "다른 점주가 배정될 예정입니다. 잠시 기다려 주세요.",
+            )
         )
-    )
 
     # 주변 다른 점주에게 재알림 (해당 점주 제외하고 반경 내 재발송)
     if order.pickup_lat and order.pickup_lng:
