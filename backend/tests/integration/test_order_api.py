@@ -30,7 +30,7 @@ async def test_create_order_success(client: AsyncClient, customer_user, make_aut
 
 @pytest.mark.asyncio
 async def test_create_order_invalid_category(client: AsyncClient, customer_user, make_auth_header):
-    """잘못된 카테고리 → 422"""
+    """잘못된 카테고리 → 400 (DB에서 wash_items 조회 후 없으면 400)"""
     resp = await client.post(
         "/api/v1/orders/",
         json={
@@ -43,7 +43,7 @@ async def test_create_order_invalid_category(client: AsyncClient, customer_user,
         },
         headers=make_auth_header(customer_user["id"], "CUSTOMER"),
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
