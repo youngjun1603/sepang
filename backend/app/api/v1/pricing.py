@@ -1,13 +1,20 @@
 """
-요금 설정 API (관리자 전용)
-────────────────────────────
-GET  /api/v1/pricing/weather           날씨 요금 목록
-PUT  /api/v1/pricing/weather/{id}      날씨 요금 수정
-GET  /api/v1/pricing/distance          거리 구간 요금 목록
-POST /api/v1/pricing/distance          거리 구간 추가
-PUT  /api/v1/pricing/distance/{id}     거리 구간 수정
-DELETE /api/v1/pricing/distance/{id}  거리 구간 삭제
-GET  /api/v1/pricing/preview           요금 미리보기 (날씨+거리 조합)
+요금 설정 API
+──────────────────────────────────────────────────────────
+[관리자]
+GET    /api/v1/pricing/weather              날씨 요금 목록
+PUT    /api/v1/pricing/weather/{id}         날씨 요금 수정
+GET    /api/v1/pricing/distance             거리 구간 목록
+POST   /api/v1/pricing/distance             거리 구간 추가
+PUT    /api/v1/pricing/distance/{id}        거리 구간 수정
+DELETE /api/v1/pricing/distance/{id}        거리 구간 삭제
+POST   /api/v1/pricing/preview              요금 미리보기
+GET    /api/v1/pricing/shop-adj-settings    점주 조정 허용 범위 조회
+PUT    /api/v1/pricing/shop-adj-settings    점주 조정 허용 범위 수정
+
+[점주]
+GET    /api/v1/pricing/my-adj              내 가격 조정률 조회
+PUT    /api/v1/pricing/my-adj              내 가격 조정률 설정
 """
 from __future__ import annotations
 from typing import Optional
@@ -67,6 +74,14 @@ class PricePreviewRequest(BaseModel):
     lat:          float = Field(..., ge=33, le=43)
     lon:          float = Field(..., ge=124, le=132)
     distance_km:  float = Field(..., ge=0)
+    shop_adj_rate: float = Field(0.0, ge=-1.0, le=1.0)
+
+class ShopAdjSettings(BaseModel):
+    min_rate: float = Field(..., ge=-0.9, le=0.0,  description="최대 할인율 (음수, 예: -0.30 = -30%)")
+    max_rate: float = Field(..., ge=0.0,  le=0.9,  description="최대 인상율 (양수, 예: 0.20 = +20%)")
+
+class MyAdjRequest(BaseModel):
+    adj_rate: float = Field(..., description="조정률 (예: -0.10 = -10%, 0.05 = +5%)")
 
 
 # ── 날씨 요금 ─────────────────────────────────────────────────────
@@ -254,8 +269,16 @@ async def preview_price(
     weather_amount = int(round(req.base_amount * weather_mult))
     final_amount   = weather_amount + distance_surcharge
 
+    shop_adj_amount = int(round(req.base_amount * req.shop_adj_rate))
+    adj_base        = req.base_amount + shop_adj_amount
+    weather_amount  = int(round(adj_base * weather_mult))
+    final_amount    = weather_amount + distance_surcharge
+
     return {
         "base_amount":        req.base_amount,
+        "shop_adj_rate":      req.shop_adj_rate,
+        "shop_adj_amount":    shop_adj_amount,
+        "adj_base":           adj_base,
         "weather_condition":  weather_condition,
         "weather_multiplier": weather_mult,
         "weather_amount":     weather_amount,
@@ -263,9 +286,121 @@ async def preview_price(
         "distance_surcharge": distance_surcharge,
         "final_amount":       final_amount,
         "breakdown": {
-            "base":     req.base_amount,
-            "weather":  weather_amount - req.base_amount,
-            "distance": distance_surcharge,
-            "total":    final_amount,
+            "base":       req.base_amount,
+            "shop_adj":   shop_adj_amount,
+            "weather":    weather_amount - adj_base,
+            "distance":   distance_surcharge,
+            "total":      final_amount,
         },
+    }
+
+
+# ── 점주 가격 조정 허용 범위 (관리자) ───────────────────────────────────
+
+@router.get("/shop-adj-settings")
+async def get_shop_adj_settings(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_role("ADMIN")),
+):
+    """관리자 — 점주 가격 조정 허용 범위 조회"""
+    row = await db.execute(
+        text("SELECT min_rate, max_rate, updated_at FROM price_adj_settings ORDER BY id DESC LIMIT 1")
+    )
+    rec = row.fetchone()
+    if not rec:
+        return {"min_rate": -0.30, "max_rate": 0.20}
+    return {"min_rate": float(rec.min_rate), "max_rate": float(rec.max_rate), "updated_at": rec.updated_at}
+
+
+@router.put("/shop-adj-settings")
+async def update_shop_adj_settings(
+    req: ShopAdjSettings,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("ADMIN")),
+):
+    """관리자 — 점주 가격 조정 허용 범위 수정"""
+    if req.min_rate >= req.max_rate:
+        raise HTTPException(400, "min_rate는 max_rate보다 작아야 합니다")
+    await db.execute(
+        text("""
+            UPDATE price_adj_settings
+            SET min_rate = :min, max_rate = :max,
+                updated_at = NOW(), updated_by = :uid
+        """),
+        {"min": req.min_rate, "max": req.max_rate, "uid": current_user.id},
+    )
+    await db.commit()
+    return {"min_rate": req.min_rate, "max_rate": req.max_rate}
+
+
+# ── 점주 본인 가격 조정률 ────────────────────────────────────────────────
+
+@router.get("/my-adj")
+async def get_my_adj(
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("PARTNER")),
+):
+    """점주 — 내 가격 조정률 및 허용 범위 조회"""
+    if not current_user.shop_id:
+        raise HTTPException(400, "등록된 매장이 없습니다")
+
+    row = await db.execute(
+        text("SELECT price_adj_rate FROM shops WHERE id = :id"),
+        {"id": current_user.shop_id},
+    )
+    shop = row.fetchone()
+    if not shop:
+        raise HTTPException(404, "매장을 찾을 수 없습니다")
+
+    lim = await db.execute(
+        text("SELECT min_rate, max_rate FROM price_adj_settings ORDER BY id DESC LIMIT 1")
+    )
+    limits = lim.fetchone()
+    min_r = float(limits.min_rate) if limits else -0.30
+    max_r = float(limits.max_rate) if limits else  0.20
+
+    adj = float(shop.price_adj_rate)
+    return {
+        "current_adj_rate": adj,
+        "current_adj_pct":  f"{adj * 100:+.1f}%",
+        "allowed_min":      min_r,
+        "allowed_max":      max_r,
+        "allowed_min_pct":  f"{min_r * 100:+.1f}%",
+        "allowed_max_pct":  f"{max_r * 100:+.1f}%",
+    }
+
+
+@router.put("/my-adj")
+async def update_my_adj(
+    req: MyAdjRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_role("PARTNER")),
+):
+    """점주 — 내 가격 조정률 설정 (관리자 허용 범위 내)"""
+    if not current_user.shop_id:
+        raise HTTPException(400, "등록된 매장이 없습니다")
+
+    lim = await db.execute(
+        text("SELECT min_rate, max_rate FROM price_adj_settings ORDER BY id DESC LIMIT 1")
+    )
+    limits = lim.fetchone()
+    min_r = float(limits.min_rate) if limits else -0.30
+    max_r = float(limits.max_rate) if limits else  0.20
+
+    if not (min_r <= req.adj_rate <= max_r):
+        raise HTTPException(
+            400,
+            f"조정률은 {min_r*100:+.0f}% ~ {max_r*100:+.0f}% 범위 내에서만 설정 가능합니다"
+        )
+
+    await db.execute(
+        text("UPDATE shops SET price_adj_rate = :rate WHERE id = :id"),
+        {"rate": req.adj_rate, "id": current_user.shop_id},
+    )
+    await db.commit()
+
+    return {
+        "adj_rate": req.adj_rate,
+        "adj_pct":  f"{req.adj_rate * 100:+.1f}%",
+        "message":  "가격 조정률이 적용되었습니다",
     }

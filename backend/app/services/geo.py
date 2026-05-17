@@ -22,6 +22,7 @@ async def find_nearby_shops(
             SELECT
                 id,
                 name,
+                COALESCE(price_adj_rate, 0.0) AS price_adj_rate,
                 ST_Distance(
                     location::geography,
                     ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography
@@ -40,4 +41,12 @@ async def find_nearby_shops(
         {"lat": lat, "lng": lng, "radius_m": radius_m},
     )
     rows = result.mappings().all()
-    return [{"id": str(r["id"]), "name": r["name"], "distance_m": float(r["distance_m"])} for r in rows]
+    return [
+        {
+            "id":             str(r["id"]),
+            "name":           r["name"],
+            "price_adj_rate": float(r["price_adj_rate"]),
+            "distance_m":     float(r["distance_m"]),
+        }
+        for r in rows
+    ]

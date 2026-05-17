@@ -278,12 +278,16 @@ async def create_order(
     )
     weather_amount = int(round(base_amount * weather_multiplier))
 
-    # ── 거리 요금 적용 (가장 가까운 활성 매장 기준) ─────────────
+    # ── 거리 요금 + 점주 가격 조정률 적용 (가장 가까운 활성 매장 기준) ─
     distance_km = 0.0
     distance_surcharge = 0
+    shop_adj_rate = 0.0
+    shop_adj_amount = 0
     nearby = await find_nearby_shops(db, req.pickup_lat, req.pickup_lng, radius_m=5000)
     if nearby:
-        distance_km = round(nearby[0]["distance_m"] / 1000, 3)
+        distance_km   = round(nearby[0]["distance_m"] / 1000, 3)
+        shop_adj_rate = nearby[0].get("price_adj_rate", 0.0)
+
         dist_row = await db.execute(
             text("""
                 SELECT surcharge FROM distance_pricing
@@ -298,6 +302,11 @@ async def create_order(
         dist_result = dist_row.fetchone()
         if dist_result:
             distance_surcharge = dist_result.surcharge
+
+    # 점주 조정률 → 기본가에 먼저 적용, 이후 날씨 배수 적용
+    shop_adj_amount = int(round(base_amount * shop_adj_rate))
+    adj_base_with_shop = base_amount + shop_adj_amount
+    weather_amount = int(round(adj_base_with_shop * weather_multiplier))
 
     # 날씨 + 거리 적용된 기준 금액
     adjusted_base = weather_amount + distance_surcharge
@@ -327,7 +336,8 @@ async def create_order(
                 base_amount, discount_amount, total_amount,
                 platform_fee, coupon_id, customer_note, points_used,
                 weather_condition, weather_multiplier,
-                distance_km, distance_surcharge
+                distance_km, distance_surcharge,
+                shop_adj_rate, shop_adj_amount
             ) VALUES (
                 :customer_id, CAST(:service_type AS service_type), :wash_category,
                 :pickup_address,  ST_SetSRID(ST_MakePoint(:pickup_lng, :pickup_lat), 4326),
@@ -335,7 +345,8 @@ async def create_order(
                 :base_amount, :total_discount, :total,
                 1000, :coupon_id, :note, :points_used,
                 :weather_condition, :weather_multiplier,
-                :distance_km, :distance_surcharge
+                :distance_km, :distance_surcharge,
+                :shop_adj_rate, :shop_adj_amount
             )
             RETURNING id, deadline_at
         """),
@@ -359,6 +370,8 @@ async def create_order(
             "weather_multiplier": weather_multiplier,
             "distance_km":        distance_km,
             "distance_surcharge": distance_surcharge,
+            "shop_adj_rate":      shop_adj_rate,
+            "shop_adj_amount":    shop_adj_amount,
         }
     )
     row = result.fetchone()
@@ -408,9 +421,11 @@ async def create_order(
         "total_amount": total,
         "price_breakdown": {
             "base_amount":        base_amount,
+            "shop_adj_rate":      shop_adj_rate,
+            "shop_adj_amount":    shop_adj_amount,
             "weather_condition":  weather_condition,
             "weather_multiplier": weather_multiplier,
-            "weather_surcharge":  weather_amount - base_amount,
+            "weather_surcharge":  weather_amount - adj_base_with_shop,
             "distance_km":        distance_km,
             "distance_surcharge": distance_surcharge,
             "coupon_discount":    discount,
