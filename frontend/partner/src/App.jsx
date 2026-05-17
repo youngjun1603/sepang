@@ -82,6 +82,64 @@ function Toast({ msg, onHide }) {
   );
 }
 
+// ─── PWA 홈 화면 추가 ─────────────────────────────────────────────────────────
+function useInstallPrompt() {
+  const isStandalone = typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches;
+  const isIOS = typeof window !== "undefined" && /iPhone|iPad|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const wasDismissed = typeof window !== "undefined" && localStorage.getItem("pwa-install-dismissed") === "1";
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [show, setShow] = useState(!isStandalone && !wasDismissed && isIOS);
+
+  useEffect(() => {
+    if (isStandalone || wasDismissed) return;
+    const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); setShow(true); };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const install = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    setDeferredPrompt(null);
+    setShow(false);
+  };
+
+  const dismiss = () => { localStorage.setItem("pwa-install-dismissed", "1"); setShow(false); };
+  return { show, isIOS: isIOS && !deferredPrompt, install, dismiss };
+}
+
+function InstallBanner() {
+  const { show, isIOS, install, dismiss } = useInstallPrompt();
+  if (!show) return null;
+  return (
+    <div style={{
+      position:"fixed", bottom:66, left:"50%", transform:"translateX(-50%)",
+      width:"100%", maxWidth:430, background:"#0057FF", color:"#fff",
+      padding:"12px 16px", display:"flex", alignItems:"center", gap:10,
+      zIndex:200, boxShadow:"0 -2px 12px rgba(0,87,255,.3)",
+    }}>
+      <span style={{fontSize:22}}>📲</span>
+      <div style={{flex:1, fontSize:13, lineHeight:1.45}}>
+        {isIOS
+          ? <>Safari 하단 <strong>공유 버튼(⎙)</strong> 탭 후 <strong>"홈 화면에 추가"</strong> 선택</>
+          : <><strong>세팡 파트너</strong>를 홈 화면에 추가하고 앱처럼 빠르게 이용하세요</>
+        }
+      </div>
+      {!isIOS && (
+        <button onClick={install} style={{
+          background:"#fff", color:"#0057FF", border:"none", borderRadius:8,
+          padding:"7px 14px", fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap",
+        }}>추가</button>
+      )}
+      <button onClick={dismiss} style={{
+        background:"transparent", color:"rgba(255,255,255,.7)", border:"none",
+        fontSize:20, cursor:"pointer", lineHeight:1, padding:"0 2px",
+      }}>✕</button>
+    </div>
+  );
+}
+
 // ─── CSS ──────────────────────────────────────────────────────────────────────
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&family=Syne:wght@700;800&display=swap');
@@ -603,6 +661,7 @@ export default function PartnerApp() {
     <Router>
       <AuthProvider>
         <RouteSwitch/>
+        <InstallBanner/>
       </AuthProvider>
     </Router>
   );
