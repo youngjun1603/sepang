@@ -36,10 +36,16 @@ jobs:
       - name: Run Alembic migrations
         working-directory: backend
         env:
-          DATABASE_URL: ${{ secrets.SUPABASE_DIRECT_URL }}
+          SUPABASE_DIRECT_URL: ${{ secrets.SUPABASE_DIRECT_URL }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
           ENVIRONMENT: development
           JWT_SECRET: migration-only-not-used
-        run: alembic upgrade head
+        run: |
+          # SUPABASE_DIRECT_URL 은 IPv6 전용(db.*.supabase.co) → GitHub Actions(IPv4)에서 연결 불가
+          # Session Pooler URL(aws-1-*.pooler.supabase.com)로 변환하여 사용
+          PASSWORD=$(echo "$SUPABASE_DIRECT_URL" | sed 's|.*://postgres:\(.*\)@db\..*|\1|')
+          export DATABASE_URL="postgresql+asyncpg://postgres.${SUPABASE_PROJECT_REF}:${PASSWORD}@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres"
+          alembic upgrade head
 
   # ── 백엔드 (FastAPI → Vercel Python Serverless) ─────────────────
   deploy-backend:

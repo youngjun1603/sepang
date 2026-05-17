@@ -17,18 +17,19 @@ def upgrade() -> None:
     op.execute("""
         CREATE TABLE weather_pricing (
             id          SERIAL PRIMARY KEY,
-            condition   VARCHAR(20) NOT NULL UNIQUE,  -- RAIN | SNOW | RAIN_SNOW
+            condition   VARCHAR(20) NOT NULL UNIQUE,
             multiplier  NUMERIC(4,2) NOT NULL DEFAULT 1.0,
             is_active   BOOLEAN NOT NULL DEFAULT true,
             description TEXT,
             updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_by  UUID REFERENCES users(id) ON DELETE SET NULL
-        );
-
+        )
+    """)
+    op.execute("""
         INSERT INTO weather_pricing (condition, multiplier, description) VALUES
             ('RAIN',      1.50, '비 오는 날 요금 1.5배'),
             ('SNOW',      2.00, '눈 오는 날 요금 2.0배'),
-            ('RAIN_SNOW', 1.75, '비/눈 혼합 시 요금 1.75배');
+            ('RAIN_SNOW', 1.75, '비/눈 혼합 시 요금 1.75배')
     """)
 
     # ── 2. 거리 구간 요금 설정 ──────────────────────────────────
@@ -36,20 +37,20 @@ def upgrade() -> None:
         CREATE TABLE distance_pricing (
             id          SERIAL PRIMARY KEY,
             min_km      NUMERIC(5,2) NOT NULL,
-            max_km      NUMERIC(5,2),          -- NULL = 초과 구간 (이상)
+            max_km      NUMERIC(5,2),
             surcharge   INTEGER NOT NULL DEFAULT 0,
             is_active   BOOLEAN NOT NULL DEFAULT true,
             description TEXT,
             updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_by  UUID REFERENCES users(id) ON DELETE SET NULL
-        );
-
-        -- 구간: min_km 이상 max_km 미만 (1.0km → 0~1km 구간, 1.0001km → 1~2km 구간)
+        )
+    """)
+    op.execute("""
         INSERT INTO distance_pricing (min_km, max_km, surcharge, description) VALUES
             (0,    1.0,  0,    '1km 미만 — 기본 요금'),
             (1.0,  2.0,  1000, '1km 이상 2km 미만 — +1,000원'),
             (2.0,  3.0,  2000, '2km 이상 3km 미만 — +2,000원'),
-            (3.0,  NULL, 3000, '3km 이상 — +3,000원');
+            (3.0,  NULL, 3000, '3km 이상 — +3,000원')
     """)
 
     # ── 3. 매장 운영 시간 ────────────────────────────────────────
@@ -58,13 +59,12 @@ def upgrade() -> None:
             id           SERIAL PRIMARY KEY,
             shop_id      UUID NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
             day_of_week  SMALLINT NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
-            -- 0=월 1=화 2=수 3=목 4=금 5=토 6=일
             is_closed    BOOLEAN NOT NULL DEFAULT false,
             is_24h       BOOLEAN NOT NULL DEFAULT false,
-            open_time    TIME,   -- is_24h=false, is_closed=false 일 때 사용
+            open_time    TIME,
             close_time   TIME,
             UNIQUE (shop_id, day_of_week)
-        );
+        )
     """)
 
     # ── 4. 점주 패널티 ──────────────────────────────────────────
@@ -74,15 +74,13 @@ def upgrade() -> None:
             shop_id      UUID NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
             order_id     UUID REFERENCES orders(id) ON DELETE SET NULL,
             penalty_type VARCHAR(30) NOT NULL,
-            -- LATE_ACCEPT: 수락 지연 | REJECTION: 거절 | NO_RESPONSE: 무응답
             penalty_point INTEGER NOT NULL DEFAULT 1,
             description  TEXT,
             created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-
-        CREATE INDEX idx_partner_penalties_shop ON partner_penalties(shop_id);
-        CREATE INDEX idx_partner_penalties_created ON partner_penalties(created_at);
+        )
     """)
+    op.execute("CREATE INDEX idx_partner_penalties_shop ON partner_penalties(shop_id)")
+    op.execute("CREATE INDEX idx_partner_penalties_created ON partner_penalties(created_at)")
 
     # ── 5. shops 테이블 — 패널티 관련 컬럼 추가 ─────────────────
     op.execute("""
